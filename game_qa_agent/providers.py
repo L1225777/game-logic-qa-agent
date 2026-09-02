@@ -10,6 +10,26 @@ class NextActionProvider(Protocol):
     ) -> NextActionSpec: ...
 
 
+def normalize_provider_action(action: NextActionSpec) -> NextActionSpec:
+    """Return the canonical controller contract for a provider action."""
+    if action.action_type == "call_tool":
+        return NextActionSpec(
+            action_type="call_tool",
+            tool_name=action.tool_name,
+            reason=action.reason,
+        )
+    if action.action_type == "expand_scope":
+        return NextActionSpec(
+            action_type="expand_scope",
+            expand_task_ids=action.expand_task_ids,
+            reason=action.reason,
+        )
+    return NextActionSpec(
+        action_type=action.action_type,
+        reason=action.reason,
+    )
+
+
 class DeepSeekProvider:
     """Real provider. Construction and use are deliberately explicit."""
 
@@ -56,4 +76,5 @@ class DeepSeekProvider:
         content = response.choices[0].message.content
         if content is None:
             raise ValueError("DeepSeek returned empty response content.")
-        return NextActionSpec.model_validate_json(content)
+        parsed_action = NextActionSpec.model_validate_json(content)
+        return normalize_provider_action(parsed_action)

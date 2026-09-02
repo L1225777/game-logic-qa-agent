@@ -8,10 +8,10 @@ from game_qa_agent.models import (
     Task,
     ValidationIssue,
 )
-from game_qa_agent.orchestration import execute_action
+from game_qa_agent.orchestration import execute_action, run_agent_investigation
 from game_qa_agent.tools import build_default_tool_registry
 
-from conftest import action
+from conftest import ScriptedProvider, action
 
 
 def make_state() -> AgentInvestigationState:
@@ -62,3 +62,22 @@ def test_already_scoped_ids_are_not_expandable() -> None:
     assert compute_expandable_task_ids(
         state, build_task_index([Task(id="task_a"), Task(id="task_b")])
     ) == ["task_b"]
+
+
+def test_max_step_exhaustion_has_explicit_terminal_status() -> None:
+    state = make_state()
+    provider = ScriptedProvider([
+        action("call_tool", tool_name="unknown_tool"),
+    ])
+
+    result = run_agent_investigation(
+        state,
+        build_default_tool_registry(),
+        build_task_index([Task(id="task_a")]),
+        GameRuntimeState(),
+        provider,
+        max_steps=1,
+    )
+
+    assert result.investigation_status == "max_steps_exceeded"
+    assert len(result.decision_errors) == 1

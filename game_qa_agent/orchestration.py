@@ -97,4 +97,6 @@ def run_agent_investigation(
             "finished", "clarification_required", "human_review_required"
         }:
             break
+    if state.investigation_status == "running":
+        state.investigation_status = "max_steps_exceeded"
     return state
