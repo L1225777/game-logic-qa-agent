@@ -63,6 +63,7 @@ class AgentInvestigationState(BaseModel):
     expandable_task_ids: list[str] = Field(default_factory=list)
     scope_version: int = 1
     called_tool_names: list[str] = Field(default_factory=list)
+    called_tool_scope_versions: dict[str, list[int]] = Field(default_factory=dict)
     issues: list[ValidationIssue] = Field(default_factory=list)
     decision_errors: list[str] = Field(default_factory=list)
     investigation_status: str = "start"

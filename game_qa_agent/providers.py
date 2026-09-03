@@ -59,7 +59,8 @@ class DeepSeekProvider:
                 "npc_static_conflict_checker, and npc_runtime_checker. Only choose "
                 "expand_scope when expand_task_ids is a non-empty subset of the "
                 "current expandable_task_ids. Never invent task IDs. For call_tool, "
-                "use empty tool_args and expand_task_ids. Do not repeat tools. If "
+                "use empty tool_args and expand_task_ids. Do not repeat a tool at "
+                "the same scope_version; it may run again after scope expands. If "
                 "decision_errors is non-empty, correct the rejected decision."
             ),
         }
@@ -73,7 +74,15 @@ class DeepSeekProvider:
             response_format={"type": "json_object"},
             stream=False,
         )
-        content = response.choices[0].message.content
+        if not response.choices:
+            raise ValueError("DeepSeek returned no completion choices.")
+        choice = response.choices[0]
+        if choice.finish_reason != "stop":
+            raise ValueError(
+                "DeepSeek completion was not accepted: expected finish_reason "
+                f"'stop', received {choice.finish_reason!r}."
+            )
+        content = choice.message.content
         if content is None:
             raise ValueError("DeepSeek returned empty response content.")
         parsed_action = NextActionSpec.model_validate_json(content)

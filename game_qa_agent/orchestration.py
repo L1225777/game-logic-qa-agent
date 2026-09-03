@@ -26,9 +26,18 @@ def execute_action(
             return reject_agent_action(
                 state, "Rejected call_tool because its extra action fields were not empty."
             )
-        if action.tool_name in state.called_tool_names:
+        called_scope_versions = state.called_tool_scope_versions.get(
+            action.tool_name, []
+        )
+        legacy_call_without_version = (
+            action.tool_name in state.called_tool_names
+            and action.tool_name not in state.called_tool_scope_versions
+        )
+        if state.scope_version in called_scope_versions or legacy_call_without_version:
             return reject_agent_action(
-                state, f"Rejected repeated tool call '{action.tool_name}'."
+                state,
+                f"Rejected repeated tool call '{action.tool_name}' at scope version "
+                f"{state.scope_version}.",
             )
         try:
             tool_function = tool_registry.get_tool(action.tool_name)
@@ -37,8 +46,14 @@ def execute_action(
         tool_inputs = build_tool_inputs(
             action.tool_name, state, full_task_index, full_game_runtime_state
         )
-        state.called_tool_names.append(action.tool_name)
-        state.issues.extend(tool_function(**tool_inputs))
+        if action.tool_name not in state.called_tool_names:
+            state.called_tool_names.append(action.tool_name)
+        state.called_tool_scope_versions.setdefault(action.tool_name, []).append(
+            state.scope_version
+        )
+        for issue in tool_function(**tool_inputs):
+            if issue not in state.issues:
+                state.issues.append(issue)
         refresh_expandable_task_ids(state, full_task_index)
         state.investigation_status = "running"
     elif action.action_type == "expand_scope":
