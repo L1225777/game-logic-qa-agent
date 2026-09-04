@@ -1,7 +1,18 @@
 from .analysis import refresh_expandable_task_ids
 from .models import AgentInvestigationState, GameRuntimeState, NextActionSpec, Task
 from .providers import NextActionProvider
+from .trace import (
+    InvestigationFinalStatus,
+    InvestigationStepTrace,
+    InvestigationTraceRecorder,
+    summarize_investigation_action,
+)
 from .tools import ToolRegistry, build_tool_inputs
+
+
+TERMINAL_INVESTIGATION_STATUSES = {
+    "finished", "clarification_required", "human_review_required"
+}
 
 
 def reject_agent_action(
@@ -102,16 +113,81 @@ def run_agent_investigation(
     full_game_runtime_state: GameRuntimeState,
     provider: NextActionProvider,
     max_steps: int = 8,
+    trace_recorder: InvestigationTraceRecorder | None = None,
 ) -> AgentInvestigationState:
-    for _ in range(max_steps):
+    if max_steps < 1:
+        raise ValueError("max_steps must be at least 1.")
+
+    for step_index in range(max_steps):
         action = provider.generate_next_action(state)
+        trace_before = None
+        if trace_recorder is not None:
+            try:
+                trace_before = {
+                    "action": summarize_investigation_action(
+                        action, tool_registry.tools
+                    ),
+                    "scope_version": state.scope_version,
+                    "scope_task_ids": list(state.scope_task_ids),
+                    "investigation_status": state.investigation_status,
+                    "issue_count": len(state.issues),
+                    "decision_error_count": len(state.decision_errors),
+                }
+            except Exception:
+                # Trace is passive diagnostic state and must never affect execution.
+                trace_before = None
         state = execute_action(
             action, state, tool_registry, full_task_index, full_game_runtime_state
         )
-        if state.investigation_status in {
-            "finished", "clarification_required", "human_review_required"
-        }:
+        if trace_recorder is not None and trace_before is not None:
+            try:
+                new_decision_error_count = (
+                    len(state.decision_errors)
+                    - trace_before["decision_error_count"]
+                )
+                if new_decision_error_count:
+                    outcome = "rejected"
+                elif state.investigation_status in TERMINAL_INVESTIGATION_STATUSES:
+                    outcome = "terminal"
+                else:
+                    outcome = "processed"
+                trace_recorder.record_step(InvestigationStepTrace(
+                    step_number=step_index + 1,
+                    action=trace_before["action"],
+                    scope_version_before=trace_before["scope_version"],
+                    scope_version_after=state.scope_version,
+                    scope_task_ids_before=trace_before["scope_task_ids"],
+                    scope_task_ids_after=list(state.scope_task_ids),
+                    investigation_status_before=trace_before[
+                        "investigation_status"
+                    ],
+                    investigation_status_after=state.investigation_status,
+                    new_issue_types=[
+                        issue.issue_type
+                        for issue in state.issues[trace_before["issue_count"]:]
+                    ],
+                    new_decision_error_count=new_decision_error_count,
+                    outcome=outcome,
+                ))
+            except Exception:
+                # Recorder and Trace model failures are telemetry-only failures.
+                pass
+        if state.investigation_status in TERMINAL_INVESTIGATION_STATUSES:
             break
     if state.investigation_status == "running":
         state.investigation_status = "max_steps_exceeded"
+    final_status: InvestigationFinalStatus | None = None
+    if state.investigation_status == "finished":
+        final_status = "finished"
+    elif state.investigation_status == "clarification_required":
+        final_status = "clarification_required"
+    elif state.investigation_status == "human_review_required":
+        final_status = "human_review_required"
+    elif state.investigation_status == "max_steps_exceeded":
+        final_status = "max_steps_exceeded"
+    if trace_recorder is not None and final_status is not None:
+        try:
+            trace_recorder.record_final_status(final_status)
+        except Exception:
+            pass
     return state
