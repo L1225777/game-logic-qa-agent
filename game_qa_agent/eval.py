@@ -171,7 +171,15 @@ def _evaluate_expectations(
 
 
 def run_evaluation_case(case: AgentEvaluationCase) -> AgentEvaluationCaseResult:
+    return _run_evaluation_case_with_state(case)[0]
+
+
+def _run_evaluation_case_with_state(
+    case: AgentEvaluationCase,
+) -> tuple[AgentEvaluationCaseResult, AgentInvestigationState | None]:
+    """One execution path; the private state is for downstream safe projection only."""
     stage: EvaluationHarnessStage = "investigation_execution"
+    state = None
     try:
         state = case.initial_state.model_copy(deep=True)
         tasks = [task.model_copy(deep=True) for task in case.tasks]
@@ -210,7 +218,7 @@ def run_evaluation_case(case: AgentEvaluationCase) -> AgentEvaluationCaseResult:
                 stage=stage,
                 exception_type=type(error).__name__,
             ),
-        )
+        ), state
 
     passed_expectations = [
         result.expectation for result in expectation_results if result.passed
@@ -225,7 +233,7 @@ def run_evaluation_case(case: AgentEvaluationCase) -> AgentEvaluationCaseResult:
         expectation_results=expectation_results,
         passed_expectations=passed_expectations,
         failed_expectations=failed_expectations,
-    )
+    ), observation
 
 
 def run_evaluation_suite(

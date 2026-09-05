@@ -159,6 +159,11 @@ flowchart LR
     State --> Report[Safe report projection]
     Trace -.-> Report
     Report --> Markdown
+    State -->|canonical execution provenance| Evidence[Safe evidence exporter]
+    Eval -->|existing outcomes| Evidence
+    Report -->|allowlisted finding details| Evidence
+    Evidence --> Package[Local evidence package]
+    Package --> Reader[Hash and semantic validator]
 ```
 
 ## Provider decision context and active Tools
@@ -276,12 +281,78 @@ mechanism. Report still summarizes recorded findings without exporting execution
 outcomes or certifying their coverage.
 
 `tests/test_projection_fields.py` classifies every relevant upstream Pydantic field
-at the Context, Trace, and Report boundaries as exposed, summarized/derived, or
+at the Context, Trace, Report, and evidence-package boundaries as exposed, summarized/derived, or
 internal-only. New fields require a conscious test update; explicit runtime
 allowlists remain the safety boundary. Cross-round tests cover repeat rejection,
 authorized expansion and rerun through the final Report, Trace on/off/failure,
 separate investigations, and step-limit prefixes. Existing tests already cover
 safe rejection recovery and transient request recovery through the real Tool loop.
+
+## Local offline evidence package
+
+`game_qa_agent.evidence.run_evidence_package("offline-evidence-001")` runs the four
+existing deterministic cases into a new directory and returns a validated typed
+package. `read_evidence_package("offline-evidence-001")` reopens and validates it
+without running the Agent. The runner also accepts a list of trusted, non-sensitive
+`AgentEvaluationCase` definitions with unique string case IDs and fresh initial
+states. Case IDs use `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; trusted task IDs are never
+abbreviated. It reuses the existing Eval execution and expectation checks; it does not
+construct DeepSeek, load environment files, or call a network provider.
+
+Schema 1 has exactly four published artifacts:
+
+- `plan.json`: frozen before any case executes; run UUID, actual full Git HEAD and
+  dirty flag at planning time, Python/Pydantic/NetworkX/OpenAI versions, planned
+  case slots, explicit repetition 1, fingerprints, oracle expectations, active
+  default Tools, step limits, Trace configuration, initial scope, and safe scripted
+  action structure. Unknown action names/IDs become a marker/count; args become
+  a presence flag. Reasons and raw arguments are excluded even from hash input.
+- `results.json`: one result per planned slot, with separate execution, evaluation,
+  and evidence states. Required evidence includes canonical final status/scope,
+  decision-error count, trusted Tool execution records and finding links. Findings
+  reuse the Report allowlist in canonical issue order; unknown pairs retain an
+  indexed placeholder, and equal safe projections are not merged. Indices refer
+  only to the finding array in that result's run/case slot.
+- `report.md`: derived only from those results, including planned/evaluated/pass/
+  fail/harness counts and evidence completeness. A zero behavioral denominator is
+  `N/A`. A Tool failure can have complete evidence of its partial failed execution
+  while remaining `harness_error / unscored`.
+- `manifest.json`: published last, with run identity, completion marker, and exact
+  byte size/SHA-256 for the other three artifacts. Without it the reader reports
+  `incomplete`. The manifest does not hash itself.
+
+Run identity, case content identity, and artifact hashes have distinct purposes.
+Canonical JSON uses sorted string keys, UTF-8, compact separators and a final LF;
+unsupported objects, non-string keys and NaN/Infinity are rejected. The fixture
+digest covers explicit trusted Task/runtime fixture fields, not Tool observations.
+The case fingerprint binds that digest, the safe scripted configuration and oracle;
+changing fixture/expectations changes it, while run ordering does not. Ignored
+private action text is deliberately outside this identity. Fixture values must
+already be non-sensitive: hashing is not secret redaction. Fixture contents and
+source patches are not archived, so this is not a self-contained replay package.
+
+The reader checks schemas, sizes/hashes, run identities, exact unique slot sets,
+fingerprints, expectation consistency, canonical execution/finding references,
+and the derived Markdown. Missing canonical evidence cannot certify a behavioral
+pass. Trace contributes only optional count/status diagnostics; existing cases
+may explicitly check Trace expectations, but Trace never supplies provenance.
+Raw state, messages/evidence payloads, arbitrary rejected IDs, provider text,
+exception text/types/tracebacks and raw Trace objects are not exported.
+
+Each file uses a same-directory temporary file, flush, file fsync, then replace.
+Publication succeeds only after disk readback validation; required write or
+validation failure raises and leaves an incomplete diagnostic directory. Existing
+directories are never reused. Files can be visible after an unsuccessful call;
+manifest cleanup is attempted on failure. Directory durability is explicitly not
+confirmed. Hashes detect modification against a manifest, not a coordinated forged
+package; no signing or source authentication is claimed. A dirty flag does not
+identify the exact uncommitted patch. Completion does not imply QA pass, full Tool
+coverage, archived model conversations, or live-model quality.
+
+`tests/test_evidence_package.py` verifies disk round-trips, corruption, cross-run and
+slot mismatches, canonical provenance, privacy canaries, and injected write/fsync
+failures offline. This supports discussing verifiable local evidence, honest case
+accounting, and safe exports; it does not establish production durability.
 
 ## Provider request reliability
 
