@@ -1,4 +1,15 @@
 from .analysis import analyze_initial_change_impact, build_task_index
+from .eval import (
+    AgentEvaluationCase,
+    AgentEvaluationCaseResult,
+    AgentEvaluationEvidence,
+    AgentEvaluationExpectationResult,
+    AgentEvaluationHarnessError,
+    AgentEvaluationSummary,
+    build_deterministic_evaluation_cases,
+    run_evaluation_case,
+    run_evaluation_suite,
+)
 from .models import (
     AgentInvestigationState,
     GameRuntimeState,
@@ -32,4 +43,9 @@ __all__ = [
     "InvestigationStepOutcome",
     "InvestigationStepTrace", "InvestigationTraceRecorder",
     "summarize_investigation_action",
+    "AgentEvaluationCase", "AgentEvaluationCaseResult",
+    "AgentEvaluationEvidence", "AgentEvaluationExpectationResult",
+    "AgentEvaluationHarnessError", "AgentEvaluationSummary",
+    "build_deterministic_evaluation_cases", "run_evaluation_case",
+    "run_evaluation_suite",
 ]
