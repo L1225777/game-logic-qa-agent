@@ -72,6 +72,7 @@ def execute_action(
         execution_number = len(state.tool_executions) + 1
         issue_indices: list[int] = []
         succeeded = False
+        state.investigation_status = "running"
         try:
             for issue in tool_function(**tool_inputs):
                 if issue not in state.issues:
@@ -90,7 +91,6 @@ def execute_action(
                 issue_indices=tuple(issue_indices),
             ))
         refresh_expandable_task_ids(state, full_task_index)
-        state.investigation_status = "running"
     elif action.action_type == "expand_scope":
         if action.tool_name is not None or action.tool_args:
             return reject_agent_action(

@@ -4,7 +4,7 @@ from game_qa_agent.analysis import build_task_index
 from game_qa_agent.context import build_provider_decision_context
 from game_qa_agent.models import GameRuntimeState, Task, ValidationIssue
 from game_qa_agent.orchestration import execute_action, run_agent_investigation
-from game_qa_agent.report import build_qa_report
+from game_qa_agent.report import build_qa_report, render_qa_report_markdown
 from game_qa_agent.tools import ToolRegistry, build_default_tool_registry
 from game_qa_agent.trace import InMemoryInvestigationTraceRecorder
 
@@ -152,6 +152,12 @@ def test_failed_execution_links_partial_findings_and_preserves_exception_behavio
     before = state.model_dump_json()
     context = build_provider_decision_context(state, registry)
     report = build_qa_report(state, trace)
+    assert state.investigation_status == report.status == "running"
+    assert "still_running" in report.limitations
+    assert "not_started" not in report.limitations
+    markdown = render_qa_report_markdown(report)
+    assert "The investigation has not started." not in markdown
+    assert "The investigation has not reached a terminal status." in markdown
     without_records = state.model_copy(deep=True)
     without_records.tool_executions.clear()
     assert context == build_provider_decision_context(without_records, registry)
