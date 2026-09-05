@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from .analysis import analyze_initial_change_impact, build_task_index
+from .context import ProviderDecisionContext
 from .models import (
     AgentInvestigationState,
     GameRuntimeState,
@@ -111,7 +112,7 @@ class _ScriptedEvaluationProvider:
         self._actions = deque(action.model_copy(deep=True) for action in actions)
 
     def generate_next_action(
-        self, state: AgentInvestigationState
+        self, context: ProviderDecisionContext
     ) -> NextActionSpec:
         return self._actions.popleft()
 

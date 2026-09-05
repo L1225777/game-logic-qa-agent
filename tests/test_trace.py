@@ -1,6 +1,7 @@
 import pytest
 
 from game_qa_agent.analysis import build_task_index
+from game_qa_agent.context import ProviderDecisionContext
 from game_qa_agent.models import (
     AgentInvestigationState,
     GameRuntimeState,
@@ -228,7 +229,7 @@ def test_invalid_max_steps_does_not_call_provider_or_recorder(
             self.call_count = 0
 
         def generate_next_action(
-            self, state: AgentInvestigationState
+            self, context: ProviderDecisionContext
         ) -> NextActionSpec:
             self.call_count += 1
             return action("finish")
@@ -261,16 +262,16 @@ def test_invalid_max_steps_does_not_call_provider_or_recorder(
     assert recorder.call_count == 0
 
 
-def test_provider_state_never_contains_trace_data() -> None:
+def test_provider_context_never_contains_trace_data() -> None:
     class InspectingProvider:
         def __init__(self) -> None:
-            self.observed_states: list[dict[str, object]] = []
+            self.observed_contexts: list[dict[str, object]] = []
 
         def generate_next_action(
-            self, state: AgentInvestigationState
+            self, context: ProviderDecisionContext
         ) -> NextActionSpec:
-            self.observed_states.append(state.model_dump())
-            if len(self.observed_states) == 1:
+            self.observed_contexts.append(context.model_dump())
+            if len(self.observed_contexts) == 1:
                 return action(
                     "call_tool", tool_name="dependency_reference_checker"
                 )
@@ -287,7 +288,7 @@ def test_provider_state_never_contains_trace_data() -> None:
         trace_recorder=recorder,
     )
 
-    assert len(provider.observed_states) == 2
+    assert len(provider.observed_contexts) == 2
     assert len(recorder.steps) == 2
-    for observed_state in provider.observed_states:
-        assert not any("trace" in key.lower() for key in observed_state)
+    for observed_context in provider.observed_contexts:
+        assert not any("trace" in key.lower() for key in observed_context)

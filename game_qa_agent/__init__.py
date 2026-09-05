@@ -1,4 +1,5 @@
 from .analysis import analyze_initial_change_impact, build_task_index
+from .context import ProviderDecisionContext, build_provider_decision_context
 from .eval import (
     AgentEvaluationCase,
     AgentEvaluationCaseResult,
@@ -43,6 +44,7 @@ from .tools import ToolRegistry, build_default_tool_registry
 
 __all__ = [
     "AgentInvestigationState", "GameRuntimeState", "ImpactAnalysisResult",
+    "ProviderDecisionContext", "build_provider_decision_context",
     "NPCRequirement", "NPCRuntimeState", "NextActionProvider", "NextActionSpec",
     "Task", "ToolRegistry", "ValidationIssue", "analyze_initial_change_impact",
     "build_default_tool_registry", "build_task_index", "execute_action",

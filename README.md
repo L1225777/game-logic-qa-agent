@@ -1,8 +1,9 @@
 # Game QA Agent
 
-The Agent chooses investigation actions through a provider. The controller validates
-actions, builds trusted Tool inputs, and authorizes scope expansion from checker
-findings. Deterministic checkers inspect task dependencies and NPC requirements.
+The Agent chooses investigation actions through a provider. Before each decision,
+the controller projects trusted state and active Tool capabilities into a bounded
+context. It validates proposed actions, builds trusted Tool inputs, and authorizes
+scope expansion from checker findings. Deterministic checkers inspect task dependencies and NPC requirements.
 Trace records optional execution diagnostics; Eval checks scripted expectations
 against the real investigation path.
 
@@ -35,7 +36,7 @@ class OfflineProvider:
     def __init__(self, actions):
         self.actions = deque(actions)
 
-    def generate_next_action(self, state):
+    def generate_next_action(self, context):
         return self.actions.popleft()
 
 
@@ -145,7 +146,10 @@ flowchart LR
     Controller -->|trusted inputs| Tools
     Tools -->|findings| Controller
     Controller -->|findings, status and scope| State[Investigation state]
-    State -->|decision context| Provider
+    State -->|trusted decision facts| Controller
+    Registry[Active Tool registry] -->|current Tool configuration| Controller
+    Controller -->|construct each round| Context[Bounded decision context]
+    Context -->|decision facts and capability guidance| Provider
     Controller -.->|optional records| Trace
     State --> Eval[Eval evidence]
     Trace --> Eval
@@ -154,10 +158,91 @@ flowchart LR
     Report --> Markdown
 ```
 
+## Provider decision context and active Tools
+
+`run_agent_investigation` calls `build_provider_decision_context(state, registry)`
+before each Agent round. Providers now implement
+`generate_next_action(context: ProviderDecisionContext) -> NextActionSpec`.
+`DeepSeekProvider` requires that context type; passing an investigation state is
+an error. Scripted providers use the same boundary. Context models are frozen and
+use tuples for nested collections, so the provider receives a detached snapshot.
+
+Provider-visible fields | Meaning and bounds
+--- | ---
+`investigation_goal`, `goal_truncated` | Up to 2,000 goal characters, with an explicit truncation flag.
+`scope_task_ids`, `omitted_scope_task_count` | Up to 128 unique sorted trusted scope IDs. IDs longer than 128 characters are omitted, never shortened into different identifiers.
+`expandable_task_ids`, `omitted_expandable_task_count` | The same bounds applied to currently controller-authorized expansion candidates.
+`scope_version`, `investigation_status` | Current version and a fixed status vocabulary; unrecognized status text becomes `unknown`.
+`active_tools` | Sorted active registry names, each with `blocked_by_call_history` and `last_called_scope_version` (or `None`). Only the latest version at or before the current scope is included.
+`finding_counts`, `unrecognized_finding_count` | Counts for the seven existing finding-type labels plus a count of unknown labels; no per-finding payloads or references.
+`decision_error_count`, `last_decision_rejection` | Historical error count and one fixed code for the most recent controller rejection, or `None`.
+
+The context excludes impact-analysis payloads, raw issue messages/evidence,
+checker names and issue task/NPC references, raw decision-error strings, inactive
+or rejected Tool names, rejected expansion IDs, full Tool inputs/results, Trace,
+Eval, Report, provider-failure diagnostics, and credentials/environment fields.
+Finding counts summarize recorded type labels; they do not authenticate checker
+identity or prove coverage, severity, or that static risks occurred at runtime.
+
+`AgentInvestigationState.last_decision_rejection` is the only added state field.
+The controller assigns one of `missing_tool_name`, `unexpected_action_fields`,
+`tool_already_called`, `unknown_tool`, `no_expandable_tasks`,
+`empty_scope_expansion`, or `unauthorized_scope_expansion` at the corresponding
+rejection branch. Processing the next proposal clears it before that proposal is
+checked. Existing `decision_errors` strings and accumulation remain unchanged.
+Older state with only raw error strings supplies an error count without an
+inferred rejection code; error text is never parsed to reconstruct feedback.
+
+Active capabilities come from `ToolRegistry.active_tool_names()` on the registry
+used by the controller for that investigation. Registration and trusted input
+construction share one supported input-contract map in `tools.py`. Registration
+rejects a Tool name without a trusted input contract; direct invalid edits to the
+public registry also fail when capabilities are requested, rather than silently
+advertising or hiding an unusable Tool. Removing an active Tool or switching to
+another supported Tool changes the next context without editing provider prompts.
+The call-history rule is shared with controller execution, including the existing
+conservative handling of legacy calls with no recorded scope version.
+
+Capability visibility is guidance, not authorization. The controller still checks
+the current registry, call history, action fields, and authorized expansion IDs at
+execution time. A stale or forged context cannot grant permission. The registry
+currently supports the four existing named Tool input contracts; adding another
+requires an explicit trusted input contract. Registered implementations must honor
+their contract; the registry does not prove arbitrary callable behavior correct.
+
+DeepSeek system instructions are fixed local text. Goal text, IDs, capabilities,
+and summaries appear only in the user-message JSON. The context is serialized once
+per provider decision and reused for request retries. Completion acceptance,
+normalization, retry/fail-fast policy, and Agent step accounting are unchanged.
+Trace stays passive, Eval uses the real controller path, and Report stays read-only.
+
+The projection does not mutate state or registry and performs no I/O. Size bounds
+are character and collection limits, not token budgets; no token or cost reduction
+has been measured. Omitted context can reduce the provider's ability to decide;
+the prompt directs it toward clarification or human review when needed. Tool
+execution still uses the full controller-owned scope, including IDs omitted from
+the provider view. The goal and visible trusted IDs are intentional input text,
+not automatically secret-redacted or authenticated against forged caller state.
+
+Run `python -m pytest -q tests/test_provider_context.py` for the context checks.
+They cover request privacy, immutability, deterministic bounds, active configuration,
+controller authority, rejection feedback, and dynamic scope without network calls.
+Baseline fingerprints verify identical business state, Trace, Eval, Report, and
+Markdown for all four deterministic scenarios, excluding only the new rejection
+field. Provider reliability tests also verify identical bounded context across
+retry attempts. The existing offline report example still matches its output.
+
+A supported resume statement is: "Implemented bounded controller-owned provider
+contexts with active Tool capabilities, structured rejection feedback, and offline
+privacy and authorization regressions." Interview discussion can explain context
+projection versus state serialization, capability guidance versus authorization,
+and why trusted Tool input contracts must agree with registry configuration. These
+tests do not establish live-provider decision quality or production readiness.
+
 ## Provider request reliability
 
 `DeepSeekProvider` owns a small request retry policy. Each
-`generate_next_action(state)` call permits at most three SDK requests: an initial
+`generate_next_action(context)` call permits at most three SDK requests: an initial
 attempt and two retries, with waits of 0.5 and 1 second. SDK retries are explicitly
 disabled (`max_retries=0`), so nested retries cannot multiply that budget or retry
 quota errors before the provider classifies them. The same decision context and
@@ -196,7 +281,7 @@ requests made for that decision. Retryability describes the last failure, so it
 can remain true when the three-attempt budget is exhausted. Messages are local
 constants. SDK/Pydantic errors can retain credentials, requests, bodies, and
 rejected inputs, so their exception chains are deliberately discarded. The
-provider raises after the unsafe handlers return and removes client/state
+provider raises after the unsafe handlers return and removes client/context
 references from its own exception frame. This is a diagnostic boundary, not
 process-memory sanitization or control over caller logging and traceback frames.
 

@@ -17,7 +17,7 @@ from game_qa_agent.tools import build_default_tool_registry
 from game_qa_agent.trace import InMemoryInvestigationTraceRecorder
 
 from conftest import ScriptedProvider
-from test_provider_completion import VALID_ACTION_JSON, investigation_state
+from test_provider_completion import VALID_ACTION_JSON, decision_context, investigation_state
 
 
 @pytest.fixture(autouse=True)
@@ -92,7 +92,7 @@ def test_sdk_does_not_retry_quota_exhaustion(monkeypatch) -> None:
         provider = DeepSeekProvider(api_key="offline-test-key")
 
         with pytest.raises(ProviderError) as caught:
-            provider.generate_next_action(investigation_state())
+            provider.generate_next_action(decision_context())
 
     assert len(requests) == 1
     assert waits == []
@@ -107,7 +107,8 @@ def test_transient_rate_limit_retries_the_same_request_then_succeeds() -> None:
     state = investigation_state()
     before = state.model_dump_json()
 
-    action = provider.generate_next_action(state)
+    context = decision_context(state)
+    action = provider.generate_next_action(context)
 
     assert action == NextActionSpec.model_validate_json(VALID_ACTION_JSON)
     assert len(calls) == 2
@@ -122,7 +123,7 @@ def test_retry_budget_exhaustion_exposes_last_safe_failure() -> None:
     )
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 3
     assert waits == [0.5, 1.0]
@@ -153,7 +154,7 @@ def test_quota_429_fails_fast_despite_retry_headers(body) -> None:
     ), completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 1
     assert waits == []
@@ -170,7 +171,7 @@ def test_explicit_do_not_retry_overrides_retryable_status(status) -> None:
     ), completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 1
     assert waits == []
@@ -186,7 +187,7 @@ def test_request_failure_does_not_export_sdk_text_payloads_or_chain() -> None:
     }))
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     error = caught.value
     assert "private-" not in str(error)
@@ -228,7 +229,7 @@ def test_invalid_completion_is_normalized_without_retry(response) -> None:
     provider, calls, waits = scripted_provider(response, completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 1
     assert waits == []
@@ -246,7 +247,8 @@ def test_successful_first_attempt_preserves_request_and_action_normalization() -
     state = investigation_state()
     before = state.model_dump_json()
 
-    action = provider.generate_next_action(state)
+    context = decision_context(state)
+    action = provider.generate_next_action(context)
 
     assert action == NextActionSpec(
         action_type="call_tool", tool_name="npc_runtime_checker", reason="check runtime",
@@ -258,7 +260,7 @@ def test_successful_first_attempt_preserves_request_and_action_normalization() -
     assert calls[0]["stream"] is False
     assert calls[0]["messages"][0]["role"] == "system"
     assert calls[0]["messages"][1] == {
-        "role": "user", "content": f"Current AgentInvestigationState:\n{before}",
+        "role": "user", "content": context.model_dump_json(),
     }
     assert state.model_dump_json() == before
 
@@ -267,7 +269,7 @@ def test_successful_first_attempt_preserves_request_and_action_normalization() -
 def test_temporary_service_failures_retry(status) -> None:
     provider, calls, waits = scripted_provider(status_error(status), completion())
 
-    assert provider.generate_next_action(investigation_state()).action_type == "finish"
+    assert provider.generate_next_action(decision_context()).action_type == "finish"
     assert len(calls) == 2
     assert waits == [0.5]
 
@@ -279,7 +281,7 @@ def test_permanent_status_does_not_retry_even_with_positive_hints(status) -> Non
     ), completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 1
     assert waits == []
@@ -297,7 +299,7 @@ def test_transport_failures_retry_without_exporting_request(error_type) -> None:
     )
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 3
     assert waits == [0.5, 1.0]
@@ -318,7 +320,7 @@ def test_retry_after_is_bounded_and_only_controls_waiting(header, expected_wait)
         status_error(headers={"Retry-After": header}), completion(),
     )
 
-    provider.generate_next_action(investigation_state())
+    provider.generate_next_action(decision_context())
 
     assert len(calls) == 2
     assert waits == [expected_wait]
@@ -333,7 +335,7 @@ def test_retry_stops_immediately_when_failure_becomes_permanent(last_outcome) ->
     provider, calls, waits = scripted_provider(status_error(), last_outcome, completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 2
     assert waits == [0.5]
@@ -353,7 +355,7 @@ def test_sdk_response_decode_and_validation_failures_are_not_transient(error) ->
     provider, calls, waits = scripted_provider(error, completion())
 
     with pytest.raises(ProviderError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert len(calls) == 1
     assert waits == []
@@ -390,10 +392,10 @@ def test_real_sdk_obeys_one_outer_request_budget(monkeypatch, eventually_succeed
         provider = DeepSeekProvider(api_key="offline-test-key", wait=waits.append)
 
         if eventually_succeeds:
-            assert provider.generate_next_action(investigation_state()).action_type == "finish"
+            assert provider.generate_next_action(decision_context()).action_type == "finish"
         else:
             with pytest.raises(ProviderError) as caught:
-                provider.generate_next_action(investigation_state())
+                provider.generate_next_action(decision_context())
             assert caught.value.attempts == 3
         assert provider.client.max_retries == 0
 

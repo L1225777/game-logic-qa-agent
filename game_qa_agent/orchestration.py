@@ -1,5 +1,8 @@
 from .analysis import refresh_expandable_task_ids
-from .models import AgentInvestigationState, GameRuntimeState, NextActionSpec, Task
+from .context import build_provider_decision_context
+from .models import (
+    AgentInvestigationState, DecisionRejectionCode, GameRuntimeState, NextActionSpec, Task,
+)
 from .providers import NextActionProvider
 from .trace import (
     InvestigationFinalStatus,
@@ -7,7 +10,7 @@ from .trace import (
     InvestigationTraceRecorder,
     summarize_investigation_action,
 )
-from .tools import ToolRegistry, build_tool_inputs
+from .tools import ToolRegistry, build_tool_inputs, tool_call_is_blocked
 
 
 TERMINAL_INVESTIGATION_STATUSES = {
@@ -16,9 +19,10 @@ TERMINAL_INVESTIGATION_STATUSES = {
 
 
 def reject_agent_action(
-    state: AgentInvestigationState, message: str
+    state: AgentInvestigationState, message: str, *, code: DecisionRejectionCode,
 ) -> AgentInvestigationState:
     state.decision_errors.append(message)
+    state.last_decision_rejection = code
     state.investigation_status = "running"
     return state
 
@@ -30,30 +34,31 @@ def execute_action(
     full_task_index: dict[str, Task],
     full_game_runtime_state: GameRuntimeState,
 ) -> AgentInvestigationState:
+    state.last_decision_rejection = None
     if action.action_type == "call_tool":
         if action.tool_name is None:
-            return reject_agent_action(state, "Rejected call_tool because tool_name was missing.")
+            return reject_agent_action(
+                state, "Rejected call_tool because tool_name was missing.",
+                code="missing_tool_name",
+            )
         if action.tool_args or action.expand_task_ids:
             return reject_agent_action(
-                state, "Rejected call_tool because its extra action fields were not empty."
+                state, "Rejected call_tool because its extra action fields were not empty.",
+                code="unexpected_action_fields",
             )
-        called_scope_versions = state.called_tool_scope_versions.get(
-            action.tool_name, []
-        )
-        legacy_call_without_version = (
-            action.tool_name in state.called_tool_names
-            and action.tool_name not in state.called_tool_scope_versions
-        )
-        if state.scope_version in called_scope_versions or legacy_call_without_version:
+        if tool_call_is_blocked(action.tool_name, state):
             return reject_agent_action(
                 state,
                 f"Rejected repeated tool call '{action.tool_name}' at scope version "
                 f"{state.scope_version}.",
+                code="tool_already_called",
             )
         try:
             tool_function = tool_registry.get_tool(action.tool_name)
         except KeyError:
-            return reject_agent_action(state, f"Rejected unknown tool '{action.tool_name}'.")
+            return reject_agent_action(
+                state, f"Rejected unknown tool '{action.tool_name}'.", code="unknown_tool",
+            )
         tool_inputs = build_tool_inputs(
             action.tool_name, state, full_task_index, full_game_runtime_state
         )
@@ -70,17 +75,20 @@ def execute_action(
     elif action.action_type == "expand_scope":
         if action.tool_name is not None or action.tool_args:
             return reject_agent_action(
-                state, "Rejected expand_scope because its tool fields were not empty."
+                state, "Rejected expand_scope because its tool fields were not empty.",
+                code="unexpected_action_fields",
             )
         allowed = set(state.expandable_task_ids)
         requested = set(action.expand_task_ids)
         if not allowed:
             return reject_agent_action(
-                state, "Rejected expand_scope because expandable_task_ids is empty."
+                state, "Rejected expand_scope because expandable_task_ids is empty.",
+                code="no_expandable_tasks",
             )
         if not requested:
             return reject_agent_action(
-                state, "Rejected expand_scope because expand_task_ids was empty."
+                state, "Rejected expand_scope because expand_task_ids was empty.",
+                code="empty_scope_expansion",
             )
         if not requested.issubset(allowed):
             return reject_agent_action(
@@ -88,6 +96,7 @@ def execute_action(
                 "Rejected expand_scope because requested task IDs "
                 f"{sorted(requested)} are not a subset of expandable_task_ids "
                 f"{state.expandable_task_ids}.",
+                code="unauthorized_scope_expansion",
             )
         state.scope_task_ids = sorted(set(state.scope_task_ids).union(requested))
         state.scope_version += 1
@@ -96,7 +105,8 @@ def execute_action(
     elif action.action_type in {"clarify", "human_review", "finish"}:
         if action.tool_name is not None or action.tool_args or action.expand_task_ids:
             return reject_agent_action(
-                state, f"Rejected {action.action_type} because action fields were not empty."
+                state, f"Rejected {action.action_type} because action fields were not empty.",
+                code="unexpected_action_fields",
             )
         state.investigation_status = {
             "clarify": "clarification_required",
@@ -119,7 +129,8 @@ def run_agent_investigation(
         raise ValueError("max_steps must be at least 1.")
 
     for step_index in range(max_steps):
-        action = provider.generate_next_action(state)
+        context = build_provider_decision_context(state, tool_registry)
+        action = provider.generate_next_action(context)
         trace_before = None
         if trace_recorder is not None:
             try:

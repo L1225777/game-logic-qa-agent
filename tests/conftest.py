@@ -1,6 +1,7 @@
 from collections import deque
 
-from game_qa_agent.models import AgentInvestigationState, NextActionSpec
+from game_qa_agent.context import ProviderDecisionContext
+from game_qa_agent.models import NextActionSpec
 
 
 class ScriptedProvider:
@@ -8,7 +9,7 @@ class ScriptedProvider:
         self.actions = deque(actions)
 
     def generate_next_action(
-        self, state: AgentInvestigationState
+        self, context: ProviderDecisionContext
     ) -> NextActionSpec:
         return self.actions.popleft()
 

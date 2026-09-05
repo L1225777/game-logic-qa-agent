@@ -7,6 +7,11 @@ TaskStatus = Literal["inactive", "active", "paused", "completed"]
 NextActionType = Literal[
     "call_tool", "expand_scope", "clarify", "human_review", "finish"
 ]
+DecisionRejectionCode = Literal[
+    "missing_tool_name", "unexpected_action_fields", "tool_already_called",
+    "unknown_tool", "no_expandable_tasks", "empty_scope_expansion",
+    "unauthorized_scope_expansion",
+]
 
 
 class NPCRequirement(BaseModel):
@@ -66,4 +71,5 @@ class AgentInvestigationState(BaseModel):
     called_tool_scope_versions: dict[str, list[int]] = Field(default_factory=dict)
     issues: list[ValidationIssue] = Field(default_factory=list)
     decision_errors: list[str] = Field(default_factory=list)
+    last_decision_rejection: DecisionRejectionCode | None = None
     investigation_status: str = "start"

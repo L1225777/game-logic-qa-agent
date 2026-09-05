@@ -2,8 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from game_qa_agent.context import ProviderDecisionContext, build_provider_decision_context
 from game_qa_agent.models import AgentInvestigationState, ImpactAnalysisResult
 from game_qa_agent.providers import DeepSeekProvider
+from game_qa_agent.tools import build_default_tool_registry
 
 
 VALID_ACTION_JSON = (
@@ -50,9 +52,15 @@ def investigation_state() -> AgentInvestigationState:
     )
 
 
+def decision_context(state: AgentInvestigationState | None = None) -> ProviderDecisionContext:
+    return build_provider_decision_context(
+        state if state is not None else investigation_state(), build_default_tool_registry(),
+    )
+
+
 def test_stop_completion_is_accepted_before_action_parsing() -> None:
     action = provider_with_finish_reason("stop").generate_next_action(
-        investigation_state()
+        decision_context()
     )
 
     assert action.action_type == "finish"
@@ -65,13 +73,13 @@ def test_non_stop_completion_is_rejected_even_when_action_json_is_valid(
 ) -> None:
     with pytest.raises(ValueError, match="completion was not accepted"):
         provider_with_finish_reason(finish_reason).generate_next_action(
-            investigation_state()
+            decision_context()
         )
 
 
 def test_empty_choices_is_rejected_as_controlled_provider_failure() -> None:
     with pytest.raises(ValueError, match="no completion choices"):
-        provider_with_empty_choices().generate_next_action(investigation_state())
+        provider_with_empty_choices().generate_next_action(decision_context())
 
 
 def test_multiple_choices_are_rejected_before_selecting_an_action() -> None:
@@ -81,7 +89,7 @@ def test_multiple_choices_are_rejected_before_selecting_an_action() -> None:
     provider.client.chat.completions.create = lambda **kwargs: response
 
     with pytest.raises(ValueError, match="exactly one completion choice"):
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
 
 @pytest.mark.parametrize("invalid_field", ["finish_reason", "content"])
@@ -98,7 +106,7 @@ def test_rejected_completion_does_not_export_provider_text(invalid_field) -> Non
     provider.client.chat.completions.create = lambda **kwargs: response
 
     with pytest.raises(ValueError) as caught:
-        provider.generate_next_action(investigation_state())
+        provider.generate_next_action(decision_context())
 
     assert marker not in str(caught.value)
     assert marker not in repr(caught.value)
