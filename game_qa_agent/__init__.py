@@ -22,6 +22,14 @@ from .models import (
 )
 from .orchestration import execute_action, run_agent_investigation
 from .providers import NextActionProvider
+from .report import (
+    QAInvestigationReport,
+    QAReportFinding,
+    QAReportScopeChange,
+    QAReportTraceSummary,
+    build_qa_report,
+    render_qa_report_markdown,
+)
 from .trace import (
     InMemoryInvestigationTraceRecorder,
     InvestigationActionTrace,
@@ -48,4 +56,6 @@ __all__ = [
     "AgentEvaluationHarnessError", "AgentEvaluationSummary",
     "build_deterministic_evaluation_cases", "run_evaluation_case",
     "run_evaluation_suite",
+    "QAInvestigationReport", "QAReportFinding", "QAReportScopeChange",
+    "QAReportTraceSummary", "build_qa_report", "render_qa_report_markdown",
 ]
