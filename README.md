@@ -134,11 +134,14 @@ scope-version provenance, so details are filtered against the final trusted scop
 
 The implementation copies collections and performs no I/O. Output uses stable
 ordering and LF newlines without timestamps. It adds a downstream consumer only:
-Agent/controller/Tool, provider, scope, Trace and Eval behavior are unchanged.
+Agent/controller/Tool, provider, scope, Trace and Eval behavior are unchanged by
+reporting.
 
 ```mermaid
 flowchart LR
-    Provider -->|proposed action| Controller
+    Provider[Provider boundary] -->|accepted proposed action| Controller
+    Provider -->|DeepSeek: at most 3 request attempts| DeepSeek[DeepSeek API]
+    DeepSeek -->|response or request failure| Provider
     Controller -->|trusted inputs| Tools
     Tools -->|findings| Controller
     Controller -->|findings, status and scope| State[Investigation state]
@@ -150,6 +153,79 @@ flowchart LR
     Trace -.-> Report
     Report --> Markdown
 ```
+
+## Provider request reliability
+
+`DeepSeekProvider` owns a small request retry policy. Each
+`generate_next_action(state)` call permits at most three SDK requests: an initial
+attempt and two retries, with waits of 0.5 and 1 second. SDK retries are explicitly
+disabled (`max_retries=0`), so nested retries cannot multiply that budget or retry
+quota errors before the provider classifies them. The same decision context and
+request parameters are reused. There is no Agent/session recovery loop.
+
+Failure category | Request behavior
+--- | ---
+`transient_rate_limit` | Ordinary HTTP 429 retries within the budget.
+`quota_billing` | HTTP 402 or recognized quota, billing, subscription, usage-limit, or insufficient-balance/credit signals fail immediately, including HTTP 429.
+`transport_service` | SDK connection/timeouts and HTTP 408, 409, 500, 502, 503, 504 retry within the budget. Other 5xx statuses fail immediately.
+`invalid_response` | SDK response decoding/validation errors or rejected completions fail immediately.
+`non_retryable` | Remaining SDK API failures, including authentication and invalid requests, fail immediately.
+
+Quota detection inspects SDK code/type fields and the code/type/message fields of
+its error body, including a nested error object or a plain-text body. It matches a
+small set of quota/billing indicators without exporting those inputs. An explicit
+`x-should-retry: false` response header overrides retryable status rules. A positive
+hint cannot override a fail-fast classification.
+
+Only an already retryable failure can use `Retry-After`. Finite, nonnegative numeric
+seconds replace the normal wait, capped at five seconds. Negative, non-finite,
+malformed, and HTTP-date values use the fixed schedule. The constructor accepts
+`wait=callable` for deterministic tests; production defaults to `time.sleep`.
+There is no jitter, configurable retry framework, or added runtime dependency.
+
+Completion acceptance requires exactly one choice, `finish_reason="stop"`, string
+content that passes the existing `NextActionSpec.model_validate_json` contract,
+and the existing action normalization. There is no JSON repair, fallback action,
+or retry of a malformed completion. Tool authorization and trusted scope remain
+controller decisions.
+
+Callers can catch `game_qa_agent.providers.ProviderError` (a `ValueError` subclass).
+Its `failure` is a frozen `ProviderFailure` containing only category, retryability,
+HTTP status or `None`, and bounded retry-delay seconds or `None`; `attempts` counts
+requests made for that decision. Retryability describes the last failure, so it
+can remain true when the three-attempt budget is exhausted. Messages are local
+constants. SDK/Pydantic errors can retain credentials, requests, bodies, and
+rejected inputs, so their exception chains are deliberately discarded. The
+provider raises after the unsafe handlers return and removes client/state
+references from its own exception frame. This is a diagnostic boundary, not
+process-memory sanitization or control over caller logging and traceback frames.
+
+Recovery does not execute a Tool or consume an additional Agent step. On terminal
+request failure the controller still propagates an exception, preserving earlier
+state and Trace records; it does not invent an investigation status or decision
+error. Eval retains its existing harness-error behavior. Trace, Eval, and Report
+do not receive request error payloads.
+
+Run `python -m pytest -q tests/test_provider_completion.py
+tests/test_provider_normalization.py tests/test_provider_reliability.py` on one
+command line in an environment with the existing OpenAI SDK, HTTPX, and project
+test dependencies. These tests use scripted SDK errors and HTTPX `MockTransport`,
+with all waiting captured or forbidden; they perform no real network requests.
+They check quota fail-fast behavior through the SDK itself, one bounded retry
+budget, response rejection, safe diagnostics, and identical controller, Trace,
+Eval, and Report results for all four scripted evaluation scenarios.
+
+The existing offline report demo remains the runnable demo; provider reliability
+is demonstrated by the offline tests. A supported resume statement is:
+"Hardened an LLM provider boundary with bounded request retries, quota-aware
+fail-fast handling, safe failure diagnostics, and deterministic integration
+regressions." Interview discussion can explain SDK retry multiplication, 429
+ambiguity, request retries versus investigation recovery, and response acceptance.
+These checks do not establish live DeepSeek behavior or production readiness.
+Unrecognized quota wording may evade the small classifier, while ambiguous
+billing/subscription wording is handled conservatively. HTTP-date Retry-After,
+asynchronous retries, and an overall wall-clock deadline are not implemented;
+individual request timeouts retain the SDK default.
 
 ## Verification and project discussion
 

@@ -72,3 +72,35 @@ def test_non_stop_completion_is_rejected_even_when_action_json_is_valid(
 def test_empty_choices_is_rejected_as_controlled_provider_failure() -> None:
     with pytest.raises(ValueError, match="no completion choices"):
         provider_with_empty_choices().generate_next_action(investigation_state())
+
+
+def test_multiple_choices_are_rejected_before_selecting_an_action() -> None:
+    provider = provider_with_finish_reason("stop")
+    response = provider.client.chat.completions.create()
+    response.choices.append(response.choices[0])
+    provider.client.chat.completions.create = lambda **kwargs: response
+
+    with pytest.raises(ValueError, match="exactly one completion choice"):
+        provider.generate_next_action(investigation_state())
+
+
+@pytest.mark.parametrize("invalid_field", ["finish_reason", "content"])
+def test_rejected_completion_does_not_export_provider_text(invalid_field) -> None:
+    marker = "private-provider-completion-marker"
+    provider = provider_with_finish_reason("stop")
+    response = provider.client.chat.completions.create()
+    if invalid_field == "finish_reason":
+        response.choices[0].finish_reason = marker
+    else:
+        response.choices[0].message.content = (
+            '{"action_type":"' + marker + '","reason":"invalid action"}'
+        )
+    provider.client.chat.completions.create = lambda **kwargs: response
+
+    with pytest.raises(ValueError) as caught:
+        provider.generate_next_action(investigation_state())
+
+    assert marker not in str(caught.value)
+    assert marker not in repr(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None

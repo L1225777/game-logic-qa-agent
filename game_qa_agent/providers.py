@@ -1,7 +1,102 @@
 import os
-from typing import Protocol
+import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from json import JSONDecodeError
+from math import isfinite
+from typing import Literal, Protocol
+
+from pydantic import ValidationError
 
 from .models import AgentInvestigationState, NextActionSpec
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """Safe request diagnostics; never stores SDK errors or response payloads."""
+
+    category: Literal[
+        "transient_rate_limit", "quota_billing", "transport_service",
+        "invalid_response", "non_retryable",
+    ]
+    retryable: bool
+    status_code: int | None = None
+    retry_after_seconds: float | None = None
+
+
+class ProviderError(ValueError):
+    """A failed provider decision, with the number of requests actually attempted."""
+
+    def __init__(
+        self, failure: ProviderFailure, attempts: int,
+        message: str = "DeepSeek provider request failed.",
+    ) -> None:
+        self.failure = failure
+        self.attempts = attempts
+        super().__init__(f"{message} Category: {failure.category}; attempts: {attempts}.")
+
+
+_RETRY_DELAYS = (0.5, 1.0)  # Two retries after the initial request; no jitter.
+_MAX_RETRY_AFTER = 5.0
+_QUOTA_MARKERS = (
+    "insufficient quota", "quota exceeded", "quota exhaust", "exceeded quota",
+    "exceeded your current quota", "insufficient balance", "insufficient credits",
+    "billing", "subscription", "usage limit", "spending limit",
+)
+
+
+def _is_quota_failure(error) -> bool:
+    # Inspect known error fields only. Neither these values nor arbitrary error
+    # text are copied into diagnostics. The SDK normally unwraps the error body.
+    signals = [error.code, error.type]
+    body = error.body
+    if isinstance(body, dict):
+        nested = body.get("error")
+        for fields in (body, nested):
+            if isinstance(fields, dict):
+                signals.extend(fields.get(key) for key in ("code", "type", "message"))
+    elif isinstance(body, str):
+        signals.append(body)
+    return any(
+        marker in signal.casefold().replace("_", " ").replace("-", " ")
+        for signal in signals if isinstance(signal, str)
+        for marker in _QUOTA_MARKERS
+    )
+
+
+def _normalize_request_failure(error) -> ProviderFailure:
+    from openai import APIConnectionError, APIResponseValidationError
+
+    status = getattr(error, "status_code", None)
+    if type(status) is not int or not 100 <= status <= 599:
+        status = None
+    if isinstance(error, APIResponseValidationError):
+        return ProviderFailure("invalid_response", False, status)
+    if status == 402 or _is_quota_failure(error):
+        return ProviderFailure("quota_billing", False, status)
+
+    if isinstance(error, APIConnectionError):
+        category, retryable = "transport_service", True
+    elif status == 429:
+        category, retryable = "transient_rate_limit", True
+    elif status in {408, 409} or (status is not None and status >= 500):
+        category = "transport_service"
+        retryable = status in {408, 409, 500, 502, 503, 504}
+    else:
+        category, retryable = "non_retryable", False
+
+    headers = getattr(getattr(error, "response", None), "headers", {})
+    if headers.get("x-should-retry", "").strip().casefold() == "false":
+        retryable = False
+    delay = None
+    if retryable:
+        try:
+            seconds = float(headers.get("retry-after"))
+            if isfinite(seconds) and seconds >= 0:
+                delay = min(seconds, _MAX_RETRY_AFTER)
+        except (TypeError, ValueError):
+            pass
+    return ProviderFailure(category, retryable, status, delay)
 
 
 class NextActionProvider(Protocol):
@@ -33,7 +128,10 @@ def normalize_provider_action(action: NextActionSpec) -> NextActionSpec:
 class DeepSeekProvider:
     """Real provider. Construction and use are deliberately explicit."""
 
-    def __init__(self, api_key: str | None = None) -> None:
+    def __init__(
+        self, api_key: str | None = None, *,
+        wait: Callable[[float], None] | None = None,
+    ) -> None:
         from openai import OpenAI
 
         resolved_api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
@@ -42,11 +140,25 @@ class DeepSeekProvider:
         self.client = OpenAI(
             api_key=resolved_api_key,
             base_url="https://api.deepseek.com",
+            max_retries=0,
         )
+        self._wait = wait if wait is not None else time.sleep
 
     def generate_next_action(
         self, state: AgentInvestigationState
     ) -> NextActionSpec:
+        result = self._generate_next_action(state)
+        if isinstance(result, ProviderError):
+            # Raise after the request/parser handlers have returned. Even `from
+            # None` inside a handler retains the unsafe original in __context__.
+            # Keep this provider traceback frame free of client/state payloads.
+            del self, state
+            raise result
+        return result
+
+    def _generate_next_action(
+        self, state: AgentInvestigationState
+    ) -> NextActionSpec | ProviderError:
         system_message = {
             "role": "system",
             "content": (
@@ -68,22 +180,55 @@ class DeepSeekProvider:
             "role": "user",
             "content": f"Current AgentInvestigationState:\n{state.model_dump_json()}",
         }
-        response = self.client.chat.completions.create(
-            model="deepseek-v4-pro",
-            messages=[system_message, user_message],
-            response_format={"type": "json_object"},
-            stream=False,
-        )
-        if not response.choices:
-            raise ValueError("DeepSeek returned no completion choices.")
-        choice = response.choices[0]
-        if choice.finish_reason != "stop":
-            raise ValueError(
-                "DeepSeek completion was not accepted: expected finish_reason "
-                f"'stop', received {choice.finish_reason!r}."
+        for attempt in range(1, len(_RETRY_DELAYS) + 2):
+            response = self._request_once([system_message, user_message])
+            if isinstance(response, ProviderFailure):
+                if response.retryable and attempt <= len(_RETRY_DELAYS):
+                    delay = response.retry_after_seconds
+                    self._wait(_RETRY_DELAYS[attempt - 1] if delay is None else delay)
+                    continue
+                return ProviderError(response, attempt)
+
+            # A completed response is accepted or rejected once. Parsing is
+            # deliberately outside the retryable request boundary.
+            action = _parse_completion(response)
+            if isinstance(action, str):
+                return ProviderError(
+                    ProviderFailure("invalid_response", False), attempt, action,
+                )
+            return action
+
+    def _request_once(self, messages):
+        from openai import APIError
+
+        try:
+            return self.client.chat.completions.create(
+                model="deepseek-v4-pro",
+                messages=messages,
+                response_format={"type": "json_object"},
+                stream=False,
             )
-        content = choice.message.content
-        if content is None:
-            raise ValueError("DeepSeek returned empty response content.")
+        except APIError as error:
+            return _normalize_request_failure(error)
+        except (JSONDecodeError, ValidationError):
+            return ProviderFailure("invalid_response", False)
+
+
+def _parse_completion(response) -> NextActionSpec | str:
+    """Return an action or a local constant, never rejected provider text."""
+    choices = getattr(response, "choices", None)
+    if choices is None or choices == []:
+        return "DeepSeek returned no completion choices."
+    if not isinstance(choices, list) or len(choices) != 1:
+        return "DeepSeek expected exactly one completion choice."
+    choice = choices[0]
+    if getattr(choice, "finish_reason", None) != "stop":
+        return "DeepSeek completion was not accepted: expected finish_reason 'stop'."
+    content = getattr(getattr(choice, "message", None), "content", None)
+    if not isinstance(content, str) or not content:
+        return "DeepSeek returned empty or invalid response content."
+    try:
         parsed_action = NextActionSpec.model_validate_json(content)
-        return normalize_provider_action(parsed_action)
+    except ValidationError:
+        return "DeepSeek returned an invalid action response."
+    return normalize_provider_action(parsed_action)
