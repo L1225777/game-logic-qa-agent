@@ -136,6 +136,53 @@ def test_retry_budget_exhaustion_exposes_last_safe_failure() -> None:
     }
 
 
+def test_success_diagnostics_count_requests_without_retaining_provider_text() -> None:
+    response = completion()
+    response.model = "private-returned-model-marker"
+    provider, calls, waits = scripted_provider(status_error(), response, completion())
+
+    provider.generate_next_action(decision_context())
+    assert asdict(provider.last_decision_diagnostics) == {
+        "attempts": 2, "returned_model": None,
+    }
+    provider.generate_next_action(decision_context())
+    assert asdict(provider.last_decision_diagnostics) == {
+        "attempts": 1, "returned_model": None,
+    }
+    assert len(calls) == 3
+    assert waits == [0.5]
+
+
+def test_resolved_configuration_matches_sdk_and_request(monkeypatch) -> None:
+    requests = []
+    sdk_client = openai.OpenAI
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "id": "offline", "object": "chat.completion", "created": 0,
+            "model": "deepseek-v4-pro", "choices": [{
+                "index": 0, "finish_reason": "stop",
+                "message": {"role": "assistant", "content": VALID_ACTION_JSON},
+            }],
+        })
+
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http_client:
+        monkeypatch.setattr(openai, "OpenAI", lambda **kw: sdk_client(http_client=http_client, **kw))
+        provider = DeepSeekProvider(api_key="offline-test-key")
+        config = provider.resolved_configuration()
+        provider.generate_next_action(decision_context())
+        assert config.provider == "deepseek"
+        assert config.requested_model == "deepseek-v4-pro"
+        assert config.timeout_seconds == 30.0
+        assert config.project_max_attempts == 3
+        assert config.sdk_max_retries == provider.client.max_retries == 0
+        assert set(requests[0].extensions["timeout"].values()) == {config.timeout_seconds}
+        assert provider.last_decision_diagnostics.returned_model == "deepseek-v4-pro"
+        provider.client.max_retries = 1
+        assert provider.resolved_configuration().sdk_max_retries == 1
+
+
 @pytest.mark.parametrize("body", [
     {"code": "insufficient_quota"},
     {"type": "quota_exceeded"},

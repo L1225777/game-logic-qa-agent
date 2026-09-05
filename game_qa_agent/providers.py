@@ -12,14 +12,17 @@ from .context import ProviderDecisionContext
 from .models import NextActionSpec
 
 
+ProviderFailureCategory = Literal[
+    "transient_rate_limit", "quota_billing", "transport_service",
+    "invalid_response", "non_retryable",
+]
+
+
 @dataclass(frozen=True)
 class ProviderFailure:
     """Safe request diagnostics; never stores SDK errors or response payloads."""
 
-    category: Literal[
-        "transient_rate_limit", "quota_billing", "transport_service",
-        "invalid_response", "non_retryable",
-    ]
+    category: ProviderFailureCategory
     retryable: bool
     status_code: int | None = None
     retry_after_seconds: float | None = None
@@ -39,6 +42,26 @@ class ProviderError(ValueError):
 
 _RETRY_DELAYS = (0.5, 1.0)  # Two retries after the initial request; no jitter.
 _MAX_RETRY_AFTER = 5.0
+
+
+@dataclass(frozen=True)
+class ProviderConfiguration:
+    provider: Literal["deepseek"] = "deepseek"
+    requested_model: Literal["deepseek-v4-pro"] = "deepseek-v4-pro"
+    timeout_seconds: float = 30.0
+    project_max_attempts: int = len(_RETRY_DELAYS) + 1
+    sdk_max_retries: int = 0
+
+
+@dataclass(frozen=True)
+class ProviderDecisionDiagnostics:
+    attempts: int
+    # Only a known local identity may cross the diagnostic boundary. An absent
+    # or unrecognized API model value is unknown, never arbitrary provider text.
+    returned_model: Literal["deepseek-v4-pro"] | None
+
+
+DEEPSEEK_CONFIGURATION = ProviderConfiguration()
 _QUOTA_MARKERS = (
     "insufficient quota", "quota exceeded", "quota exhaust", "exceeded quota",
     "exceeded your current quota", "insufficient balance", "insufficient credits",
@@ -141,10 +164,26 @@ class DeepSeekProvider:
         self.client = OpenAI(
             api_key=resolved_api_key,
             base_url="https://api.deepseek.com",
-            max_retries=0,
-            timeout=30.0,
+            max_retries=DEEPSEEK_CONFIGURATION.sdk_max_retries,
+            timeout=DEEPSEEK_CONFIGURATION.timeout_seconds,
         )
         self._wait = wait if wait is not None else time.sleep
+        self.last_decision_diagnostics: ProviderDecisionDiagnostics | None = None
+
+    def resolved_configuration(self) -> ProviderConfiguration:
+        """Read effective SDK settings without exporting credentials or URLs."""
+        timeout = self.client.timeout
+        values = ([timeout] if isinstance(timeout, (float, int)) else [
+            timeout.connect, timeout.read, timeout.write, timeout.pool,
+        ])
+        if (not values or any(type(value) not in (float, int) or not isfinite(value)
+                              or value <= 0 for value in values)
+                or len(set(values)) != 1):
+            raise ValueError("Provider timeout is not a uniform finite value.")
+        return ProviderConfiguration(
+            timeout_seconds=float(values[0]), sdk_max_retries=self.client.max_retries,
+            project_max_attempts=len(_RETRY_DELAYS) + 1,
+        )
 
     def generate_next_action(
         self, context: ProviderDecisionContext
@@ -164,6 +203,7 @@ class DeepSeekProvider:
     def _generate_next_action(
         self, context: ProviderDecisionContext
     ) -> NextActionSpec | ProviderError:
+        self.last_decision_diagnostics = None
         system_message = {
             "role": "system",
             "content": (
@@ -193,6 +233,13 @@ class DeepSeekProvider:
         }
         for attempt in range(1, len(_RETRY_DELAYS) + 2):
             response = self._request_once([system_message, user_message])
+            returned_model = getattr(response, "model", None)
+            self.last_decision_diagnostics = ProviderDecisionDiagnostics(
+                attempts=attempt,
+                returned_model=(returned_model if type(returned_model) is str
+                                and returned_model == DEEPSEEK_CONFIGURATION.requested_model
+                                else None),
+            )
             if isinstance(response, ProviderFailure):
                 if response.retryable and attempt <= len(_RETRY_DELAYS):
                     delay = response.retry_after_seconds
@@ -214,7 +261,7 @@ class DeepSeekProvider:
 
         try:
             return self.client.chat.completions.create(
-                model="deepseek-v4-pro",
+                model=DEEPSEEK_CONFIGURATION.requested_model,
                 messages=messages,
                 response_format={"type": "json_object"},
                 stream=False,

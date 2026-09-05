@@ -1,8 +1,10 @@
-"""Version-bound local evidence for trusted, non-sensitive scripted Eval cases.
+"""Version-bound local evidence for trusted, non-sensitive Eval cases.
 
 This is an export/validation boundary, not replay or authentication. Only fresh
 cases are accepted; private execution state never becomes a serialized artifact.
 """
+
+from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
@@ -15,7 +17,7 @@ from pathlib import Path
 import platform
 import subprocess
 import tempfile
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
@@ -32,6 +34,9 @@ from .report import (
 )
 from .tools import build_default_tool_registry
 from .trace import InvestigationFinalStatus
+
+if TYPE_CHECKING:
+    from .live_eval import LiveEvidencePlan, LiveEvidenceResults
 
 
 _ARTIFACTS = ("plan.json", "results.json", "report.md")
@@ -165,7 +170,7 @@ class ArtifactDigest(_EvidenceModel):
 
 
 class EvidenceManifest(_EvidenceModel):
-    schema_version: VersionOne
+    schema_version: Annotated[int, Field(ge=1, le=2)]
     run_id: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{32}$")]
     completion: Literal["complete"]
     durability: Literal["files_fsynced_directory_not_confirmed"]
@@ -174,8 +179,8 @@ class EvidenceManifest(_EvidenceModel):
 
 @dataclass(frozen=True)
 class EvidencePackage:
-    plan: EvidencePlan
-    results: EvidenceResults
+    plan: EvidencePlan | LiveEvidencePlan
+    results: EvidenceResults | LiveEvidenceResults
     manifest: EvidenceManifest
 
 
@@ -508,12 +513,14 @@ def _reject_duplicate_keys(pairs: list) -> dict:
     return result
 
 
-def _decode(data: bytes, model: type[_EvidenceModel]) -> _EvidenceModel:
+def _decode(
+    data: bytes, model: type[_EvidenceModel], *, supported_versions: tuple[int, ...] = (1,),
+) -> _EvidenceModel:
     code = "invalid_schema"
     try:
         document = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_keys)
         if (type(document) is dict and type(document.get("schema_version")) is int
-                and document["schema_version"] != 1):
+                and document["schema_version"] not in supported_versions):
             code = "unsupported_schema"
         else:
             return model.model_validate_json(canonical_json(document), strict=True)
@@ -536,20 +543,78 @@ def _read_file(directory: Path, name: str) -> bytes:
 
 def read_evidence_package(directory: str | Path) -> EvidencePackage:
     directory = Path(directory)
-    manifest = _decode(_read_file(directory, "manifest.json"), EvidenceManifest)
+    manifest = _decode(_read_file(directory, "manifest.json"), EvidenceManifest,
+                       supported_versions=(1, 2))
     _require(set(manifest.artifacts) == set(_ARTIFACTS), "artifact_set_mismatch")
     artifacts = {name: _read_file(directory, name) for name in _ARTIFACTS}
     for name, data in artifacts.items():
         expected = manifest.artifacts[name]
         _require(len(data) == expected.size and sha256(data).hexdigest() == expected.sha256,
                  "artifact_mismatch")
-    plan = _decode(artifacts["plan.json"], EvidencePlan)
-    results = _decode(artifacts["results.json"], EvidenceResults)
+    if manifest.schema_version == 1:
+        plan_type, result_type = EvidencePlan, EvidenceResults
+    else:
+        from .live_eval import LiveEvidencePlan, LiveEvidenceResults
+        plan_type, result_type = LiveEvidencePlan, LiveEvidenceResults
+    plan = _decode(artifacts["plan.json"], plan_type,
+                   supported_versions=(manifest.schema_version,))
+    results = _decode(artifacts["results.json"], result_type,
+                      supported_versions=(manifest.schema_version,))
     _require(plan.run.run_id == results.run.run_id == manifest.run_id, "run_mismatch")
-    _validate_results(plan, results)
-    _require(artifacts["report.md"] == render_evidence_report(results).encode("utf-8"),
+    _validate_package_results(plan, results)
+    _require(artifacts["report.md"] == _render_package_report(results).encode("utf-8"),
              "report_mismatch")
     return EvidencePackage(plan=plan, results=results, manifest=manifest)
+
+
+def _validate_package_results(plan, results) -> None:
+    if plan.schema_version == 1:
+        _validate_results(plan, results)
+    else:
+        from .live_eval import validate_live_results
+        validate_live_results(plan, results)
+
+
+def _render_package_report(results) -> str:
+    if results.schema_version == 1:
+        return render_evidence_report(results)
+    from .live_eval import render_live_report
+    return render_live_report(results)
+
+
+def _publish_results(directory: Path, plan, results) -> EvidencePackage:
+    """Both Eval modes use the same required-file and manifest-last contract."""
+    code = "publication_failed"
+    try:
+        artifacts = {
+            "plan.json": canonical_json(plan.model_dump(mode="json")),
+            "results.json": canonical_json(results.model_dump(mode="json")),
+            "report.md": _render_package_report(results).encode("utf-8"),
+        }
+        for name in ("results.json", "report.md"):
+            _write_artifact(directory, name, artifacts[name])
+        _validate_package_results(plan, results)
+        for name, data in artifacts.items():
+            _require(_read_file(directory, name) == data, "artifact_mismatch")
+        manifest = EvidenceManifest(
+            schema_version=plan.schema_version, run_id=plan.run.run_id, completion="complete",
+            durability="files_fsynced_directory_not_confirmed", artifacts={
+                name: ArtifactDigest(size=len(data), sha256=sha256(data).hexdigest())
+                for name, data in artifacts.items()
+            },
+        )
+        _write_artifact(directory, "manifest.json", canonical_json(manifest.model_dump(mode="json")))
+        return read_evidence_package(directory)
+    except EvidencePackageError as error:
+        code = error.code
+    except Exception:
+        pass
+    # A replace can have made the manifest visible before raising.
+    try:
+        (directory / "manifest.json").unlink(missing_ok=True)
+    except OSError:
+        pass
+    raise EvidencePackageError(code)
 
 
 def run_evidence_package(
@@ -586,26 +651,7 @@ def run_evidence_package(
         results = EvidenceResults(
             schema_version=1, run=plan.run, planned_case_count=len(plan.slots), slots=tuple(slots),
         )
-        artifacts = {
-            "plan.json": plan_bytes,
-            "results.json": canonical_json(results.model_dump(mode="json")),
-            "report.md": render_evidence_report(results).encode("utf-8"),
-        }
-        for name in ("results.json", "report.md"):
-            _write_artifact(directory, name, artifacts[name])
-        _validate_results(plan, results)
-        # Validate actual disk bytes before publishing the only completion marker.
-        for name, data in artifacts.items():
-            _require(_read_file(directory, name) == data, "artifact_mismatch")
-        manifest = EvidenceManifest(
-            schema_version=1, run_id=plan.run.run_id, completion="complete",
-            durability="files_fsynced_directory_not_confirmed", artifacts={
-                name: ArtifactDigest(size=len(data), sha256=sha256(data).hexdigest())
-                for name, data in artifacts.items()
-            },
-        )
-        _write_artifact(directory, "manifest.json", canonical_json(manifest.model_dump(mode="json")))
-        return read_evidence_package(directory)
+        return _publish_results(directory, plan, results)
     except EvidencePackageError as error:
         code = error.code
     except Exception:

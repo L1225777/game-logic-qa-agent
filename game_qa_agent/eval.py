@@ -29,6 +29,7 @@ EvaluationExpectationName = Literal[
     "decision_error_count",
     "trace_step_count",
     "trace_final_status",
+    "required_tool_executions",
 ]
 EvaluationHarnessStage = Literal[
     "investigation_execution", "evidence_collection", "expectation_evaluation"

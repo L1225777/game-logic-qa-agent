@@ -6,8 +6,9 @@ context. It validates proposed actions, builds trusted Tool inputs, and authoriz
 scope expansion from checker findings. Deterministic checkers inspect task
 dependencies and NPC requirements. The controller records Tool execution outcomes
 and links findings to their scope versions.
-Trace records optional execution diagnostics; Eval checks scripted expectations
-against the real investigation path.
+Trace records optional execution diagnostics; Eval checks deterministic expectations
+against the real investigation path. The fixed live-provider evaluation runner is
+verified with offline fakes; no real model results are claimed here.
 
 `build_qa_report(state, trace=None)` produces a typed `QAInvestigationReport` from
 the resulting controller-owned state. `render_qa_report_markdown(report)` renders
@@ -154,7 +155,7 @@ flowchart LR
     Controller -->|construct each round| Context[Bounded decision context]
     Context -->|decision facts and capability guidance| Provider
     Controller -.->|optional records| Trace
-    State --> Eval[Eval evidence]
+    State --> Eval[Scripted Eval evidence]
     Trace --> Eval
     State --> Report[Safe report projection]
     Trace -.-> Report
@@ -163,6 +164,12 @@ flowchart LR
     Eval -->|existing outcomes| Evidence
     Report -->|allowlisted finding details| Evidence
     Evidence --> Package[Local evidence package]
+    LivePlan[Fixed 8 x 2 plan] --> LiveEval[Live Eval runner]
+    LiveEval -->|existing investigation path| Controller
+    LiveEval --> LiveResults[Slot accounting and canonical oracle]
+    Evidence -->|canonical projection| LiveResults
+    Provider -->|safe request diagnostics| LiveResults
+    LiveResults -->|shared H4 publisher, schema 2| Package
     Package --> Reader[Hash and semantic validator]
 ```
 
@@ -354,6 +361,85 @@ slot mismatches, canonical provenance, privacy canaries, and injected write/fsyn
 failures offline. This supports discussing verifiable local evidence, honest case
 accounting, and safe exports; it does not establish production durability.
 
+## Fixed-plan Provider Eval infrastructure (H5a)
+
+`game_qa_agent.live_eval.run_live_evidence_package(directory, provider_factory=...)`
+freezes eight local cases with two independent repetitions each, then runs the
+existing controller and Tools. The factory receives a safe planned slot and must
+return a fresh provider for that slot. There is no implicit DeepSeek construction
+or environment-file loading. The default `validation_only=True` labels fake/scripted
+infrastructure checks; it is a caller declaration, not a network sandbox. The tests
+use injected providers and HTTPX MockTransport under network/DNS/environment-file guards.
+A real run must explicitly supply DeepSeek providers and set `validation_only=False`;
+none has been performed for H5a.
+
+Case | Required behavior (each repeated twice)
+--- | ---
+`missing_dependency` | Execute the dependency reference checker and report its finding.
+`dependency_cycle` | Execute the cycle checker on the cyclic fixture.
+`runtime_no_findings` | Execute the runtime checker before accepting a zero-finding result.
+`dynamic_expansion` | Runtime check, authorized expansion, then static conflict check at scope version 2.
+`expanded_scope_rerun` | Run the runtime checker at versions 1 and 2 around authorized expansion.
+`active_tool_selection` | Use the active reference checker despite inactive/unknown Tool suggestions.
+`scope_boundary` | Check only trusted scope despite a suggestion to include an unauthorized task.
+`bounded_incomplete` | Execute the required checker within one decision; retain `max_steps_exceeded`.
+
+The last case expects correct incomplete behavior, not investigation completion.
+All other cases have an eight-decision limit. No oracle requires the provider to
+make an intentionally invalid proposal. Checks compare canonical final status,
+issue types, scope and rejection count using Eval's existing comparison primitive,
+and require succeeded controller-owned Tool records at specified scope versions.
+Self-declared completion, empty findings, Provider reasons and optional Trace cannot
+replace those records. These deliberately narrow tasks test specified behavior,
+not general autonomous QA performance.
+
+The plan is written before provider setup. Every one of its 16 slots is initialized
+before execution. Results distinguish `completed`, `provider_failure`,
+`harness_failure`, and `not_started`; evaluation is `passed`, `failed_behavior`,
+or `unscored`. Quota/billing, non-retryable provider failures, and harness failures
+stop later slots, which remain `not_started`. Exhausted transport/rate-limit and
+invalid-response failures stay unscored and advance to the next planned sample.
+The runner never retries a case. Tool/internal errors are harness failures, even
+if a Tool raises a ProviderError; partial findings retain failed execution links.
+
+The same slot table determines structured accounting and Markdown: planned,
+attempted, completed, evaluated, pass/fail, unscored, Provider categories, harness
+failures, not-started and evidence completeness. Both `pass / evaluated` and
+`verified pass / planned` are shown; zero denominators are `N/A`. Protocol-invalid
+completions retain `invalid_response` and remain visible outside the behavioral
+denominator. `completed` means the controller returned, not that QA passed.
+
+Decision identity is `(run_id, case_id, repetition, logical_decision)`. Request
+attempts/retries come only from safe DeepSeek diagnostics, including successes;
+unknown counts on other injected providers are `null`. Known request totals are
+reported alongside the count of decisions whose request count is unknown.
+Request retries remain inside one decision and cannot add slots or Tool executions.
+
+The plan binds provider identity, requested `deepseek-v4-pro`, 30-second timeout,
+three project attempts, SDK retries 0, repetition count, per-case step limits,
+and `none` for fallback/cache. Effective SDK timeout/retries are checked before
+execution and each decision. Returned model identity is retained only when it
+matches the locally recognized model; absent/unrecognized values are `null`.
+No credential, URL, raw header, exception text, completion, Tool payload or rejected
+ID enters the package. Source/runtime identity and fingerprints bind trusted local
+fixtures, goals, oracle and active capabilities; they are not secret redaction.
+
+Live packages use schema 2 because schema 1 fixed offline mode, repetition 1 and
+offline execution states. Existing schema 1 packages remain readable without
+migration. Both schemas share the four H4 files, atomic file writes/fsync,
+manifest-last publication, hash/run/slot validation and canonical projections.
+The reader rechecks oracle consistency and required Tool evidence. A complete
+package can honestly account for unstarted slots with incomplete execution evidence;
+it cannot certify them as behavioral passes. Missing/invalid required evidence for
+an attempted slot aborts publication. Trace is neither required nor reconstructed.
+
+H5a adds no Agent authorization changes, new checker, model judge, fallback,
+response cache, replay, persistence service or new dependency. It retains H4's
+unsigned-integrity and file-durability limitations and the Provider's per-operation
+timeout, without an overall run deadline. Interrupted publication is incomplete;
+there is no resume. First real execution, operational cost and model behavior remain
+unverified. Run `python -m pytest -q tests/test_live_eval.py` for offline acceptance.
+
 ## Provider request reliability
 
 `DeepSeekProvider` owns a small request retry policy. Each
@@ -408,8 +494,9 @@ process-memory sanitization or control over caller logging and traceback frames.
 Recovery does not execute a Tool or consume an additional Agent step. On terminal
 request failure the controller still propagates an exception, preserving earlier
 state and Trace records; it does not invent an investigation status or decision
-error. Eval retains its existing harness-error behavior. Trace, Eval, and Report
-do not receive request error payloads.
+error. Scripted offline Eval retains its existing harness-error behavior; H5a
+separately accounts for Provider failures. Trace, Eval, and Report do not receive
+request error payloads.
 
 Run `python -m pytest -q tests/test_provider_completion.py
 tests/test_provider_normalization.py tests/test_provider_reliability.py` on one
