@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 TaskStatus = Literal["inactive", "active", "paused", "completed"]
@@ -61,6 +61,18 @@ class NextActionSpec(BaseModel):
     reason: str
 
 
+class ToolExecutionRecord(BaseModel):
+    """Controller-owned outcome and links into this run's append-only issues."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    execution_number: int
+    tool_name: str
+    scope_version: int
+    status: Literal["succeeded", "failed"]
+    issue_indices: tuple[int, ...] = ()
+
+
 class AgentInvestigationState(BaseModel):
     investigation_goal: str
     impact_analysis: ImpactAnalysisResult
@@ -69,6 +81,7 @@ class AgentInvestigationState(BaseModel):
     scope_version: int = 1
     called_tool_names: list[str] = Field(default_factory=list)
     called_tool_scope_versions: dict[str, list[int]] = Field(default_factory=dict)
+    tool_executions: list[ToolExecutionRecord] = Field(default_factory=list)
     issues: list[ValidationIssue] = Field(default_factory=list)
     decision_errors: list[str] = Field(default_factory=list)
     last_decision_rejection: DecisionRejectionCode | None = None

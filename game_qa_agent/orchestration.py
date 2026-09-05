@@ -2,6 +2,7 @@ from .analysis import refresh_expandable_task_ids
 from .context import build_provider_decision_context
 from .models import (
     AgentInvestigationState, DecisionRejectionCode, GameRuntimeState, NextActionSpec, Task,
+    ToolExecutionRecord,
 )
 from .providers import NextActionProvider
 from .trace import (
@@ -67,9 +68,27 @@ def execute_action(
         state.called_tool_scope_versions.setdefault(action.tool_name, []).append(
             state.scope_version
         )
-        for issue in tool_function(**tool_inputs):
-            if issue not in state.issues:
-                state.issues.append(issue)
+        tool_name, scope_version = action.tool_name, state.scope_version
+        execution_number = len(state.tool_executions) + 1
+        issue_indices: list[int] = []
+        succeeded = False
+        try:
+            for issue in tool_function(**tool_inputs):
+                if issue not in state.issues:
+                    state.issues.append(issue)
+                issue_index = state.issues.index(issue)
+                if issue_index not in issue_indices:
+                    issue_indices.append(issue_index)
+            succeeded = True
+        finally:
+            # Keep partial findings linked on failure; propagate the original
+            # exception without copying its text or payload into business state.
+            state.tool_executions.append(ToolExecutionRecord(
+                execution_number=execution_number, tool_name=tool_name,
+                scope_version=scope_version,
+                status="succeeded" if succeeded else "failed",
+                issue_indices=tuple(issue_indices),
+            ))
         refresh_expandable_task_ids(state, full_task_index)
         state.investigation_status = "running"
     elif action.action_type == "expand_scope":

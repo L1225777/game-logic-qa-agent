@@ -142,6 +142,7 @@ class DeepSeekProvider:
             api_key=resolved_api_key,
             base_url="https://api.deepseek.com",
             max_retries=0,
+            timeout=30.0,
         )
         self._wait = wait if wait is not None else time.sleep
 

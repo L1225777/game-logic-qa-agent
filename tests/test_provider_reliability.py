@@ -404,6 +404,68 @@ def test_real_sdk_obeys_one_outer_request_budget(monkeypatch, eventually_succeed
     assert len({request.content for request in requests}) == 1
 
 
+def test_sdk_request_has_an_explicit_finite_timeout(monkeypatch) -> None:
+    requests = []
+    client_options = {}
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json={
+            "id": "offline", "object": "chat.completion", "created": 0,
+            "model": "deepseek-v4-pro", "choices": [{
+                "index": 0, "finish_reason": "stop",
+                "message": {"role": "assistant", "content": VALID_ACTION_JSON},
+            }],
+        })
+
+    sdk_client = openai.OpenAI
+    with httpx.Client(transport=httpx.MockTransport(respond)) as http_client:
+        def make_client(**kwargs):
+            client_options.update(kwargs)
+            return sdk_client(http_client=http_client, **kwargs)
+
+        monkeypatch.setattr(openai, "OpenAI", make_client)
+        provider = DeepSeekProvider(
+            api_key="offline-test-key", wait=lambda seconds: pytest.fail("Unexpected retry"),
+        )
+        assert provider.generate_next_action(decision_context()).action_type == "finish"
+        assert provider.client.max_retries == 0
+
+    assert client_options.get("timeout") == 30.0, "Provider must configure its own finite timeout"
+    assert len(requests) == 1
+    assert requests[0].extensions["timeout"] == {
+        "connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0,
+    }
+
+
+def test_real_sdk_timeouts_use_the_existing_provider_retry_budget(monkeypatch) -> None:
+    requests, waits = [], []
+
+    def timeout(request):
+        requests.append(request)
+        raise httpx.ReadTimeout("private-timeout-marker", request=request)
+
+    sdk_client = openai.OpenAI
+    with httpx.Client(transport=httpx.MockTransport(timeout)) as http_client:
+        monkeypatch.setattr(
+            openai, "OpenAI",
+            lambda **kwargs: sdk_client(http_client=http_client, **kwargs),
+        )
+        provider = DeepSeekProvider(api_key="offline-test-key", wait=waits.append)
+        with pytest.raises(ProviderError) as caught:
+            provider.generate_next_action(decision_context())
+        assert provider.client.max_retries == 0
+
+    assert caught.value.failure.category == "transport_service"
+    assert caught.value.failure.retryable is True
+    assert caught.value.attempts == len(requests) == 3
+    assert waits == [0.5, 1.0]
+    assert len({request.content for request in requests}) == 1
+    assert "private-" not in repr(vars(caught.value))
+    assert caught.value.__context__ is None
+    assert caught.value.__cause__ is None
+
+
 def run_case_with_provider(case, provider):
     trace = InMemoryInvestigationTraceRecorder()
     state = run_agent_investigation(

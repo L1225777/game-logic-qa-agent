@@ -3,7 +3,9 @@
 The Agent chooses investigation actions through a provider. Before each decision,
 the controller projects trusted state and active Tool capabilities into a bounded
 context. It validates proposed actions, builds trusted Tool inputs, and authorizes
-scope expansion from checker findings. Deterministic checkers inspect task dependencies and NPC requirements.
+scope expansion from checker findings. Deterministic checkers inspect task
+dependencies and NPC requirements. The controller records Tool execution outcomes
+and links findings to their scope versions.
 Trace records optional execution diagnostics; Eval checks scripted expectations
 against the real investigation path.
 
@@ -130,8 +132,9 @@ The report preserves recorded finding multiplicity, even when omitted payloads
 make two projected details identical. It does not infer severity, root cause,
 checker coverage, or QA pass/fail. `finished` records an Agent stop; a potential NPC
 conflict remains a static risk. Clarification, human review, step exhaustion, and
-unfinished or unknown statuses have explicit limitations. Findings lack per-issue
-scope-version provenance, so details are filtered against the final trusted scope.
+unfinished or unknown statuses have explicit limitations. The report does not
+export Tool execution records or their finding/scope links; finding details are
+still filtered against the final trusted scope.
 
 The implementation copies collections and performs no I/O. Output uses stable
 ordering and LF newlines without timestamps. It adds a downstream consumer only:
@@ -145,7 +148,7 @@ flowchart LR
     DeepSeek -->|response or request failure| Provider
     Controller -->|trusted inputs| Tools
     Tools -->|findings| Controller
-    Controller -->|findings, status and scope| State[Investigation state]
+    Controller -->|findings, Tool outcomes, status and scope| State[Investigation state]
     State -->|trusted decision facts| Controller
     Registry[Active Tool registry] -->|current Tool configuration| Controller
     Controller -->|construct each round| Context[Bounded decision context]
@@ -180,11 +183,12 @@ Provider-visible fields | Meaning and bounds
 The context excludes impact-analysis payloads, raw issue messages/evidence,
 checker names and issue task/NPC references, raw decision-error strings, inactive
 or rejected Tool names, rejected expansion IDs, full Tool inputs/results, Trace,
-Eval, Report, provider-failure diagnostics, and credentials/environment fields.
+Eval, Report, Tool execution records, provider-failure diagnostics, and
+credentials/environment fields.
 Finding counts summarize recorded type labels; they do not authenticate checker
 identity or prove coverage, severity, or that static risks occurred at runtime.
 
-`AgentInvestigationState.last_decision_rejection` is the only added state field.
+`AgentInvestigationState.last_decision_rejection` holds feedback across rounds.
 The controller assigns one of `missing_tool_name`, `unexpected_action_fields`,
 `tool_already_called`, `unknown_tool`, `no_expandable_tasks`,
 `empty_scope_expansion`, or `unauthorized_scope_expansion` at the corresponding
@@ -227,10 +231,11 @@ not automatically secret-redacted or authenticated against forged caller state.
 Run `python -m pytest -q tests/test_provider_context.py` for the context checks.
 They cover request privacy, immutability, deterministic bounds, active configuration,
 controller authority, rejection feedback, and dynamic scope without network calls.
-Baseline fingerprints verify identical business state, Trace, Eval, Report, and
-Markdown for all four deterministic scenarios, excluding only the new rejection
-field. Provider reliability tests also verify identical bounded context across
-retry attempts. The existing offline report example still matches its output.
+Baseline fingerprints verify identical pre-existing business state, Trace, Eval,
+Report, and Markdown for all four deterministic scenarios, excluding the additive
+rejection-code and Tool-execution fields. Provider reliability tests also verify
+identical bounded context across retry attempts. The existing offline report
+example still matches its output.
 
 A supported resume statement is: "Implemented bounded controller-owned provider
 contexts with active Tool capabilities, structured rejection feedback, and offline
@@ -238,6 +243,45 @@ privacy and authorization regressions." Interview discussion can explain context
 projection versus state serialization, capability guidance versus authorization,
 and why trusted Tool input contracts must agree with registry configuration. These
 tests do not establish live-provider decision quality or production readiness.
+
+## Controller-owned Tool execution evidence
+
+`AgentInvestigationState.tool_executions` records actual authorized invocations,
+independently of optional Trace. Each frozen `ToolExecutionRecord` contains a
+one-based `execution_number`, the trusted active `tool_name`, the `scope_version`
+at invocation, `status` (`succeeded` or `failed`), and `issue_indices`: zero-based
+links into this run's `state.issues`. The identity comes from the dispatched Tool,
+not a finding's self-reported `checker_name`. No exception text, Tool payload,
+timestamp, or provider data is copied into these records.
+
+In a fresh controller-owned run, no record for a Tool/version means it has not
+run. A succeeded record with no issue links explicitly records an empty result;
+a failed record records an execution failure, including any findings already
+yielded before that failure. Equal findings remain deduplicated in `state.issues`,
+and each execution that returns them links to the existing index. This preserves
+which executions and scope versions produced findings without changing findings.
+
+Tool exceptions still propagate. Failed attempts remain subject to the existing
+same-scope call-history block; rejected proposals produce no execution record.
+No Tool retry, session recovery, or requirement to run every active Tool before
+`finish` is added. The provider already gets call-history guidance; these internal
+records do not enter Context, Trace, Eval evidence, or Report. Report completion
+still means the investigation stopped, not that QA passed or coverage is complete.
+
+Links rely on the controller's append-only issue ordering. Caller-seeded findings
+and older states with call history but no execution records have unknown execution
+provenance; outcomes are not reconstructed from empty findings or Trace. Records
+do not authenticate caller-forged state and are not a persistence or crash-recovery
+mechanism. Report still summarizes recorded findings without exporting execution
+outcomes or certifying their coverage.
+
+`tests/test_projection_fields.py` classifies every relevant upstream Pydantic field
+at the Context, Trace, and Report boundaries as exposed, summarized/derived, or
+internal-only. New fields require a conscious test update; explicit runtime
+allowlists remain the safety boundary. Cross-round tests cover repeat rejection,
+authorized expansion and rerun through the final Report, Trace on/off/failure,
+separate investigations, and step-limit prefixes. Existing tests already cover
+safe rejection recovery and transient request recovery through the real Tool loop.
 
 ## Provider request reliability
 
@@ -247,6 +291,11 @@ attempt and two retries, with waits of 0.5 and 1 second. SDK retries are explici
 disabled (`max_retries=0`), so nested retries cannot multiply that budget or retry
 quota errors before the provider classifies them. The same decision context and
 request parameters are reused. There is no Agent/session recovery loop.
+
+The SDK client explicitly sets `timeout=30.0`, which reaches the HTTP request as
+30-second connect, read, write, and pool timeouts. These bound network operations,
+not the total elapsed duration of a decision. Timeout errors use the same existing
+`transport_service` classification and request budget.
 
 Failure category | Request behavior
 --- | ---
@@ -297,7 +346,8 @@ command line in an environment with the existing OpenAI SDK, HTTPX, and project
 test dependencies. These tests use scripted SDK errors and HTTPX `MockTransport`,
 with all waiting captured or forbidden; they perform no real network requests.
 They check quota fail-fast behavior through the SDK itself, one bounded retry
-budget, response rejection, safe diagnostics, and identical controller, Trace,
+budget, explicit timeout propagation, SDK timeout classification, response
+rejection, safe diagnostics, and identical controller, Trace,
 Eval, and Report results for all four scripted evaluation scenarios.
 
 The existing offline report demo remains the runnable demo; provider reliability
@@ -309,8 +359,7 @@ ambiguity, request retries versus investigation recovery, and response acceptanc
 These checks do not establish live DeepSeek behavior or production readiness.
 Unrecognized quota wording may evade the small classifier, while ambiguous
 billing/subscription wording is handled conservatively. HTTP-date Retry-After,
-asynchronous retries, and an overall wall-clock deadline are not implemented;
-individual request timeouts retain the SDK default.
+asynchronous retries, and an overall wall-clock deadline are not implemented.
 
 ## Verification and project discussion
 

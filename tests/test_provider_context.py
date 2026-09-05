@@ -403,7 +403,8 @@ def test_dynamic_scope_context_refreshes_from_real_checker_findings() -> None:
 
 
 # Captured at 6a0d9fd before edits: full business state, Trace, Eval, Report and
-# Markdown. Only the new rejection-code field is excluded from the comparison.
+# Markdown. Exclude additive rejection-code and Tool-execution evidence fields;
+# all pre-existing business fields and downstream projections stay unchanged.
 _BASELINE_FINGERPRINTS = {
     "normal_success": "5097c9870417a4380bb53bf8ff17d385443774005e82a9be9534d8f130862faf",
     "authorized_dynamic_scope_expansion": "a2e58d6d1a8c00226a38c9d75dc065b7311cbde74f22ba4a303107b20147514b",
@@ -422,7 +423,7 @@ def test_context_change_preserves_baseline_business_outputs(case) -> None:
     )
     report = build_qa_report(state, trace)
     snapshot = [
-        state.model_dump(mode="json", exclude={"last_decision_rejection"}),
+        state.model_dump(mode="json", exclude={"last_decision_rejection", "tool_executions"}),
         [step.model_dump(mode="json") for step in trace.steps], trace.final_status,
         run_evaluation_case(case).model_dump(mode="json"), report.model_dump(mode="json"),
         render_qa_report_markdown(report),
