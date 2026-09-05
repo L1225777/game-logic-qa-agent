@@ -8,7 +8,10 @@ dependencies and NPC requirements. The controller records Tool execution outcome
 and links findings to their scope versions.
 Trace records optional execution diagnostics; Eval checks deterministic expectations
 against the real investigation path. The fixed live-provider evaluation runner is
-verified with offline fakes; no real model results are claimed here.
+verified with offline fakes and one formal DeepSeek 8 x 2 run: 15/15 evaluated slots
+passed, with 15/16 planned slots having a verified behavioral pass and one Provider
+failure remaining unscored. See the [recorded live results](#recorded-fixed-plan-live-run)
+for the full accounting and limits.
 
 `build_qa_report(state, trace=None)` produces a typed `QAInvestigationReport` from
 the resulting controller-owned state. `render_qa_report_markdown(report)` renders
@@ -277,8 +280,11 @@ Tool exceptions still propagate. Failed attempts remain subject to the existing
 same-scope call-history block; rejected proposals produce no execution record.
 No Tool retry, session recovery, or requirement to run every active Tool before
 `finish` is added. The provider already gets call-history guidance; these internal
-records do not enter Context, Trace, Eval evidence, or Report. Report completion
-still means the investigation stopped, not that QA passed or coverage is complete.
+records do not enter Context, Trace, the scripted Eval's observation model, or the
+QA Report. The evidence-package projection exports their safe fields and finding
+links; the live Eval oracle uses them to verify required executions. Report
+completion still means the investigation stopped, not that QA passed or coverage
+is complete.
 
 Links rely on the controller's append-only issue ordering. Caller-seeded findings
 and older states with call history but no execution records have unknown execution
@@ -361,7 +367,7 @@ slot mismatches, canonical provenance, privacy canaries, and injected write/fsyn
 failures offline. This supports discussing verifiable local evidence, honest case
 accounting, and safe exports; it does not establish production durability.
 
-## Fixed-plan Provider Eval infrastructure (H5a)
+## Fixed-plan Provider Eval
 
 `game_qa_agent.live_eval.run_live_evidence_package(directory, provider_factory=...)`
 freezes eight local cases with two independent repetitions each, then runs the
@@ -370,8 +376,9 @@ return a fresh provider for that slot. There is no implicit DeepSeek constructio
 or environment-file loading. The default `validation_only=True` labels fake/scripted
 infrastructure checks; it is a caller declaration, not a network sandbox. The tests
 use injected providers and HTTPX MockTransport under network/DNS/environment-file guards.
-A real run must explicitly supply DeepSeek providers and set `validation_only=False`;
-none has been performed for H5a.
+A real run must explicitly supply DeepSeek providers and set `validation_only=False`.
+The formal run recorded below used this path; smoke/preflight results are excluded
+from its 16 planned slots.
 
 Case | Required behavior (each repeated twice)
 --- | ---
@@ -433,12 +440,64 @@ package can honestly account for unstarted slots with incomplete execution evide
 it cannot certify them as behavioral passes. Missing/invalid required evidence for
 an attempted slot aborts publication. Trace is neither required nor reconstructed.
 
-H5a adds no Agent authorization changes, new checker, model judge, fallback,
+The live Eval runner adds no Agent authorization changes, new checker, model judge, fallback,
 response cache, replay, persistence service or new dependency. It retains H4's
 unsigned-integrity and file-durability limitations and the Provider's per-operation
 timeout, without an overall run deadline. Interrupted publication is incomplete;
-there is no resume. First real execution, operational cost and model behavior remain
-unverified. Run `python -m pytest -q tests/test_live_eval.py` for offline acceptance.
+there is no resume. Run `python -m pytest -q tests/test_live_eval.py` for offline
+acceptance. The recorded live run below supplies observations for this fixed plan,
+not a general reliability or cost estimate.
+
+### Recorded fixed-plan live run
+
+The formal run used DeepSeek / `deepseek-v4-pro` on source commit
+`5c8d179f7ad357950494ae921fb60cbce09e9b98`, with `source_dirty=false`.
+Its schema 2 run ID is `7175f92fdb9a4061953e0651e6fab68b` and
+`validation_only=false`. This identity belongs to the executed code revision;
+later documentation commits do not change it.
+
+All eight cases above had two preplanned repetitions. The plan was frozen before
+provider setup, with no reroll, best-of-k, or changes to cases, oracle, prompt,
+Tools, scope, retry rules, or failure policy during the experiment.
+
+Measure | Recorded result
+--- | ---
+Provider / returned model | DeepSeek / `deepseek-v4-pro`
+Planned / attempted slots | 16 / 16
+Completed slots | 15
+Evaluated / behavioral pass / behavioral fail / unscored | 15 / 15 / 0 / 1
+Behavioral pass / evaluated | 15/15 = 100%
+Verified behavioral pass / planned | 15/16 = 93.75%
+Provider failures | `invalid_response` x 1
+Harness failures / not_started | 0 / 0
+Required evidence complete / incomplete | 16 / 0
+Logical decisions | 39
+Known request attempts / retries | 39 / 0
+Decisions with unknown request counts | 0
+
+The sole unscored slot was `runtime_no_findings`, repetition 2. Its first decision
+successfully executed `npc_runtime_checker` at scope version 1, leaving a succeeded
+zero-finding `ToolExecutionRecord` with empty `issue_indices`. The second decision
+was rejected as `invalid_response`; final canonical status remained `running`.
+Under the frozen policy this is `provider_failure / unscored`, not a behavioral
+failure. The record is complete evidence of the partial investigation, not a
+completed investigation or a behavioral pass. No product bug was confirmed;
+the retained safe category does not establish the specific response rejection cause.
+
+Schema 2 publication validation and independent reader validation both passed,
+including artifact hashes, exact slot identities, canonical finding/execution
+references and derived Markdown. The four run artifacts are retained outside the
+Git working tree, not bundled with this README. They contain safe projections,
+not raw completions, Provider reasons, Tool payloads, credentials or exception text.
+
+These are descriptive results for eight narrow fixtures with two repetitions
+each, not a statistically significant estimate of model generalization or
+production reliability. The 100% figure applies only to evaluated slots; verified
+behavioral pass across the planned set is 93.75%. Complete evidence is not full QA
+coverage, and `finished` is not QA pass. This run observed no request retries, so
+retry/fail-fast edge cases remain supported by deterministic offline regressions.
+No operational cost, token saving, production readiness or broad QA capability
+claim follows from this run.
 
 ## Provider request reliability
 
@@ -494,7 +553,7 @@ process-memory sanitization or control over caller logging and traceback frames.
 Recovery does not execute a Tool or consume an additional Agent step. On terminal
 request failure the controller still propagates an exception, preserving earlier
 state and Trace records; it does not invent an investigation status or decision
-error. Scripted offline Eval retains its existing harness-error behavior; H5a
+error. Scripted offline Eval retains its existing harness-error behavior; live Eval
 separately accounts for Provider failures. Trace, Eval, and Report do not receive
 request error payloads.
 
@@ -514,7 +573,8 @@ is demonstrated by the offline tests. A supported resume statement is:
 fail-fast handling, safe failure diagnostics, and deterministic integration
 regressions." Interview discussion can explain SDK retry multiplication, 429
 ambiguity, request retries versus investigation recovery, and response acceptance.
-These checks do not establish live DeepSeek behavior or production readiness.
+The offline checks exercise failure paths beyond those observed in the recorded
+live run; neither establishes general Provider reliability or production readiness.
 Unrecognized quota wording may evade the small classifier, while ambiguous
 billing/subscription wording is handled conservatively. HTTP-date Retry-After,
 asynchronous retries, and an overall wall-clock deadline are not implemented.
@@ -535,8 +595,12 @@ regressions, not evidence of live-model performance.
 Run `python -m pytest -q tests/test_report.py` for the report checks and
 `python -m pytest -q` for the complete deterministic offline suite, using an
 interpreter with pytest and the project dependencies installed. The tests reuse
-the real scripted Eval scenarios, cover all seven checker types, preserve input
+the real scripted Eval scenarios, cover four checkers and seven finding types, preserve input
 state and Trace, exercise hostile payloads, and execute the README example.
+Closeout verification passed the complete deterministic offline suite: **325 passed,
+0 failed**, with network/DNS and environment-file access blocked. The dossier's
+older baseline counts and recorded-current revision remain historical facts;
+they are not the current suite count or a moving HEAD.
 
 The example supports a reproducible demo of three recorded findings and one
 authorized scope expansion. A supported resume statement is: "Implemented typed,
@@ -544,4 +608,6 @@ deterministic QA investigation reports with scoped finding projections, optional
 Trace summaries, and offline privacy and regression tests." For an interview,
 the code and tests support discussion of scope authorization, static risk versus
 runtime observations, report privacy, and separation of execution from reporting.
-They do not establish live-provider quality, production readiness, or QA coverage.
+These regression and demo claims are separate from the recorded live results;
+neither establishes general live-provider quality, production readiness, or full
+QA coverage.
