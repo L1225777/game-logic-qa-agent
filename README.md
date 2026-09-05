@@ -434,6 +434,17 @@ asynchronous retries, and an overall wall-clock deadline are not implemented.
 
 ## Verification and project discussion
 
+The [historical failure dossier](docs/failure_dossier/README.md) documents three
+commit-pinned red-to-green cases: Tool reruns after authorized scope expansion,
+empty provider completion choices, and the first partial Tool failure being
+reported as not started. Each historical red was reproduced twice offline, with
+the original fix-revision regression; fixed and recorded-current revisions passed.
+The [structured dossier](docs/failure_dossier/dossier.json) records source/runtime
+identity, fixture/oracle and snapshot fingerprints, safe pytest observations, and
+exact reproduction commands. Its verifier reads isolated Git snapshots and blocks
+network, environment-file and real-demo access. These are historical engineering
+regressions, not evidence of live-model performance.
+
 Run `python -m pytest -q tests/test_report.py` for the report checks and
 `python -m pytest -q` for the complete deterministic offline suite, using an
 interpreter with pytest and the project dependencies installed. The tests reuse

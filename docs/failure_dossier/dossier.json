@@ -1,0 +1,584 @@
+{
+  "artifacts": {
+    "README.md": {
+      "sha256": "72a43d7e63393b5721e82865235443942435dff66e96cdb3fe009898115c8114",
+      "size": 11451
+    },
+    "reproduce.py": {
+      "sha256": "063b5514cccf55848237821facad051211731a4c1e09147734c3421ce1eacf82",
+      "size": 10308
+    }
+  },
+  "baseline_suite": {
+    "failed": 0,
+    "passed": 258
+  },
+  "evidence_levels": {
+    "A": "historical red reproduced",
+    "B": "historical red evidence exists but not rerun",
+    "C": "current regression reproducible only"
+  },
+  "evidence_package_schema_version": 1,
+  "failures": [
+    {
+      "affected_functions": [
+        "game_qa_agent/orchestration.py::execute_action",
+        "game_qa_agent/models.py::AgentInvestigationState",
+        "game_qa_agent/providers.py::DeepSeekProvider.generate_next_action (historical prompt guidance)"
+      ],
+      "buggy_revision": "d0bae4681064ffb1a129c7783baf4b2271158324",
+      "case_fingerprint": "1852bc03e866d7a59697302cb41caa2e582f9c454d9d7ed3ca17db75aaa1a5f2",
+      "current_regression_command": "python -B docs/failure_dossier/reproduce.py scope_rerun current",
+      "evidence_level": "A",
+      "failure_category": "agent_scope_correctness",
+      "failure_id": "scope_rerun",
+      "fixed_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+      "fixed_verification_command": "python -B docs/failure_dossier/reproduce.py scope_rerun fixed",
+      "fixture": {
+        "actions": [
+          "call_tool",
+          "expand_scope",
+          "call_tool"
+        ],
+        "authorized_expansion_task_ids": [
+          "task_b"
+        ],
+        "first_execution_references_task_b": true,
+        "initial_scope_task_ids": [
+          "task_a"
+        ],
+        "known_task_ids": [
+          "task_a",
+          "task_b"
+        ],
+        "tool_name": "npc_static_conflict_checker"
+      },
+      "green_evidence_status": "fixed_and_recorded_current_regressions_passed",
+      "limitations": [
+        "The focused regression uses a deterministic registered checker to expose dispatch inputs; it does not measure live model decisions.",
+        "The fix commit also contains other hardening; this dossier attributes only the scope/history change to this failure."
+      ],
+      "minimal_fix": "Record called_tool_scope_versions and block only calls at the current version, retaining conservative handling of legacy unversioned history; align the provider's local repeat guidance.",
+      "oracle": {
+        "definition_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+        "kind": "pytest_regression",
+        "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+        "test_files_sha256": "90253206f3d16d36c7e9b8922854c5f49892afe455ca3a065f6e223b51e84f14"
+      },
+      "protected_invariant": "Same Tool/scope repeats remain blocked, while an authorized larger scope permits a new execution with freshly built trusted inputs.",
+      "red_evidence_status": "historical_red_reproduced_twice",
+      "red_observation": {
+        "actual_tool_input_scopes": [
+          [
+            "task_a"
+          ]
+        ],
+        "expected_tool_input_scopes": [
+          [
+            "task_a"
+          ],
+          [
+            "task_a",
+            "task_b"
+          ]
+        ],
+        "scope_version": 2
+      },
+      "regression_node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+      "reproduction_command": "python -B docs/failure_dossier/reproduce.py scope_rerun buggy",
+      "root_cause": "execute_action rejected any tool name already in called_tool_names, independent of scope_version.",
+      "short_title": "Authorized scope expansion must permit a fresh Tool execution",
+      "symptom": "Scope reached version 2, but the same checker executed only for task_a; its authorized task_a/task_b rerun was rejected.",
+      "verifications": [
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "scope_rerun_missing",
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 1,
+          "snapshot_fingerprint": "0fb0fe71ac2805561973338866a0fa87f3d0455828c4aacbc21a892e2ca08e6b",
+          "tested_revision": "d0bae4681064ffb1a129c7783baf4b2271158324"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "scope_rerun_missing",
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 2,
+          "snapshot_fingerprint": "0fb0fe71ac2805561973338866a0fa87f3d0455828c4aacbc21a892e2ca08e6b",
+          "tested_revision": "d0bae4681064ffb1a129c7783baf4b2271158324"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_green",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 1,
+          "snapshot_fingerprint": "27f38bf141e2ce626fa832937669aef05282375d7052cfea5b3ce64c99f54663",
+          "tested_revision": "2af8d80d188422d7680377c80ac23be79c48088f"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_scope_version.py::test_same_tool_can_rerun_after_expansion_with_new_trusted_scope",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "current_green",
+          "regression_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612",
+          "repetition": 1,
+          "snapshot_fingerprint": "4b8805b4ba87f027d2a397efb0b6c77461b1b68404e1501c833c2f16eb10c168",
+          "tested_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612"
+        }
+      ]
+    },
+    {
+      "affected_functions": [
+        "game_qa_agent/providers.py::DeepSeekProvider.generate_next_action",
+        "game_qa_agent/providers.py::_parse_completion (current location)"
+      ],
+      "buggy_revision": "d0bae4681064ffb1a129c7783baf4b2271158324",
+      "case_fingerprint": "5638d33aa2f61db0df7b500b6cb334e3d56b346c1d64b3a21ccc9bd4595db70c",
+      "current_regression_command": "python -B docs/failure_dossier/reproduce.py empty_choices current",
+      "evidence_level": "A",
+      "failure_category": "provider_boundary",
+      "failure_id": "empty_choices",
+      "fixed_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+      "fixed_verification_command": "python -B docs/failure_dossier/reproduce.py empty_choices fixed",
+      "fixture": {
+        "client": "in_memory_completion_stub",
+        "completion_choice_count": 0,
+        "network_requests": 0,
+        "sdk_constructor_called": false
+      },
+      "green_evidence_status": "fixed_and_recorded_current_regressions_passed",
+      "limitations": [
+        "The historical fix introduced ValueError, not the later normalized ProviderFailure model.",
+        "Historical tests pass AgentInvestigationState; the recorded current test uses ProviderDecisionContext. Each phase uses tests from its declared revision.",
+        "The SDK constructor is bypassed and the completion client is a local stub; no DeepSeek service behavior is established."
+      ],
+      "minimal_fix": "Guard the empty choices collection before indexing and raise a controlled ValueError. The later provider reliability layer preserves this rejection as non-retryable invalid_response.",
+      "oracle": {
+        "definition_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+        "kind": "pytest_regression",
+        "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+        "test_files_sha256": "e1382702db2585e8b8fefd3188aece2e083ffb97fe577dbdfc0716a094285348"
+      },
+      "protected_invariant": "Malformed completion envelopes cannot escape acceptance as incidental indexing errors or be accepted/retried as valid actions.",
+      "red_evidence_status": "historical_red_reproduced_twice",
+      "red_observation": {
+        "completion_choice_count": 0,
+        "expected_failure": "controlled_completion_rejection",
+        "failure_signal": "empty_choices_index_error"
+      },
+      "regression_node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+      "reproduction_command": "python -B docs/failure_dossier/reproduce.py empty_choices buggy",
+      "root_cause": "The response path selected the first choice before validating that a completion choice existed.",
+      "short_title": "An empty provider choices list must fail at the acceptance boundary",
+      "symptom": "The provider boundary indexed choices[0] and raised IndexError instead of a controlled completion rejection.",
+      "verifications": [
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "empty_choices_index_error",
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 1,
+          "snapshot_fingerprint": "29a7b7ceb54e5ad168e4368363aba2e1e67dc4e3c2c3b8595372f81a00007581",
+          "tested_revision": "d0bae4681064ffb1a129c7783baf4b2271158324"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "empty_choices_index_error",
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 2,
+          "snapshot_fingerprint": "29a7b7ceb54e5ad168e4368363aba2e1e67dc4e3c2c3b8595372f81a00007581",
+          "tested_revision": "d0bae4681064ffb1a129c7783baf4b2271158324"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_green",
+          "regression_revision": "2af8d80d188422d7680377c80ac23be79c48088f",
+          "repetition": 1,
+          "snapshot_fingerprint": "740226bfb1f8f75d228be5def0b207e79393b553dde7d05ebd1d75cbc9855fa0",
+          "tested_revision": "2af8d80d188422d7680377c80ac23be79c48088f"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_provider_completion.py::test_empty_choices_is_rejected_as_controlled_provider_failure",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "current_green",
+          "regression_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612",
+          "repetition": 1,
+          "snapshot_fingerprint": "30119c9ecf10df03f14c3c89808816dde35a5b1c4b558ff41273c9943d26fc65",
+          "tested_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612"
+        }
+      ]
+    },
+    {
+      "affected_functions": [
+        "game_qa_agent/orchestration.py::execute_action",
+        "game_qa_agent/report.py::build_qa_report (affected downstream consumer)",
+        "game_qa_agent/report.py::render_qa_report_markdown (affected downstream consumer)"
+      ],
+      "buggy_revision": "4475c3b08e55674b6be393fa4ea0ef0f9fd09472",
+      "case_fingerprint": "d742cdb6c0bb0361d8b088efbe226f0e97af298ae3d95454bba0261b559fc9d3",
+      "current_regression_command": "python -B docs/failure_dossier/reproduce.py partial_failure_status current",
+      "evidence_level": "A",
+      "failure_category": "evidence_reporting_correctness",
+      "failure_id": "partial_failure_status",
+      "fixed_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7",
+      "fixed_verification_command": "python -B docs/failure_dossier/reproduce.py partial_failure_status fixed",
+      "fixture": {
+        "finding_type": "potential_npc_conflict",
+        "finish_action_remains_queued": true,
+        "initial_status": "start",
+        "max_steps": 2,
+        "partial_finding_count": 1,
+        "scope_version": 1,
+        "tool_name": "npc_static_conflict_checker",
+        "tool_raises_after_yield": true
+      },
+      "green_evidence_status": "fixed_and_recorded_current_regressions_passed",
+      "limitations": [
+        "The historical red stops at the status assertion; the later Markdown assertions execute on green. The not_started consequence also follows the unchanged Report status mapping.",
+        "Running is the existing nonterminal status, not evidence of a background worker or an added recovery mechanism.",
+        "No Report implementation change or Tool retry was part of this fix."
+      ],
+      "minimal_fix": "Move the existing running assignment immediately before Tool invocation, after authorization and trusted input construction. Preserve the original exception and partial finding linkage.",
+      "oracle": {
+        "definition_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7",
+        "kind": "pytest_regression",
+        "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+        "test_files_sha256": "3ff36d3df75dbba3d8ad1b8250e164885b148eead59bc53160e35f1367c8a61c"
+      },
+      "protected_invariant": "Once an authorized Tool actually starts, a failed partial outcome remains started and incomplete; Report must not claim the investigation never started.",
+      "red_evidence_status": "historical_red_reproduced_twice",
+      "red_observation": {
+        "actual_investigation_status": "start",
+        "actual_report_status": "start",
+        "execution_status": "failed",
+        "expected_status": "running",
+        "finding_count": 1,
+        "issue_indices": [
+          0
+        ]
+      },
+      "regression_node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+      "reproduction_command": "python -B docs/failure_dossier/reproduce.py partial_failure_status buggy",
+      "root_cause": "execute_action assigned running only after successful Tool iteration; the propagated exception bypassed that assignment.",
+      "short_title": "A failed first Tool execution must not be reported as not started",
+      "symptom": "The first Tool produced a finding and a failed execution record, but investigation/report status remained start, selecting the not_started report limitation.",
+      "verifications": [
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "partial_failure_not_started",
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7",
+          "repetition": 1,
+          "snapshot_fingerprint": "4c1322d2078f5a677c7b2641512b094aa33996582adb81d3fd428191c8a2e328",
+          "tested_revision": "4475c3b08e55674b6be393fa4ea0ef0f9fd09472"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 1,
+            "reports": [
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "matched_failure": "partial_failure_not_started",
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "failed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_red",
+          "regression_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7",
+          "repetition": 2,
+          "snapshot_fingerprint": "4c1322d2078f5a677c7b2641512b094aa33996582adb81d3fd428191c8a2e328",
+          "tested_revision": "4475c3b08e55674b6be393fa4ea0ef0f9fd09472"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "historical_green",
+          "regression_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7",
+          "repetition": 1,
+          "snapshot_fingerprint": "16ec8e019af1dcd05ea417489b5ed486ec23fae8436ae4c52b89b099d64e7a9b",
+          "tested_revision": "ff3f03dfea9b54eabf6792b12008731f495bfdf7"
+        },
+        {
+          "observation": {
+            "collected": 1,
+            "collection_errors": 0,
+            "exit_code": 0,
+            "reports": [
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "setup"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "call"
+              },
+              {
+                "node": "tests/test_tool_execution_evidence.py::test_failed_execution_links_partial_findings_and_preserves_exception_behavior",
+                "outcome": "passed",
+                "phase": "teardown"
+              }
+            ]
+          },
+          "phase": "current_green",
+          "regression_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612",
+          "repetition": 1,
+          "snapshot_fingerprint": "c7b4c09e62f321ae94e6e15e44eed24b4caac6449bb0521178d199d3a5d7820a",
+          "tested_revision": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612"
+        }
+      ]
+    }
+  ],
+  "kind": "failure_dossier",
+  "limitations": [
+    "Historical code was tested with the recorded current Python/dependency versions, not a reconstruction of the original development environment.",
+    "Current means the pinned source_commit in this dossier, not a moving HEAD.",
+    "A snapshot fingerprint hashes trusted non-sensitive source/test definitions; it is not redaction of runtime payloads.",
+    "The case fingerprint binds the fixture description and exact historical regression/helper definitions, conservatively at file granularity.",
+    "This is a curated historical document, not an Agent Eval package accepted by read_evidence_package and not a live-provider success-rate estimate.",
+    "The JSON is the metadata root; it does not hash itself. Git binds its revision, while ArtifactDigest binds the accompanying Markdown and reproduction helper. These are unsigned integrity checks, not authentication."
+  ],
+  "method": [
+    "Run identity was read at the clean current baseline before dossier files were added.",
+    "Each isolated snapshot contains unmodified Git Python blobs under game_qa_agent, excluding demo.py, plus the regression file, conftest.py and test_action_safety.py from the declared regression revision.",
+    "Historical red uses fixed-revision regression tests over buggy-revision product code. Current verification uses both product and tests from the recorded current commit.",
+    "Each buggy revision was tested twice in a fresh process; fixed and recorded-current revisions were each tested once.",
+    "Only structured pytest phase outcomes, counts and local matched-failure codes are retained. No stdout, traceback, Agent state, prompts, completions or Tool payloads are archived."
+  ],
+  "pytest_version": "9.1.1",
+  "run": {
+    "mode": "offline",
+    "run_id": "2ad64e96194b4cbeb7cc7a54ed5320d4",
+    "runtime_versions": {
+      "networkx": "3.4.2",
+      "openai": "3.6.0",
+      "pydantic": "2.13.5",
+      "python": "3.10.20"
+    },
+    "source_commit": "120a1db8d19d9548fdf76c4ff54e4f8b120f8612",
+    "source_dirty": false
+  },
+  "schema_version": 1
+}
