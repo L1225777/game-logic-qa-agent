@@ -252,12 +252,7 @@ rejection-code and Tool-execution fields. Provider reliability tests also verify
 identical bounded context across retry attempts. The existing offline report
 example still matches its output.
 
-A supported resume statement is: "Implemented bounded controller-owned provider
-contexts with active Tool capabilities, structured rejection feedback, and offline
-privacy and authorization regressions." Interview discussion can explain context
-projection versus state serialization, capability guidance versus authorization,
-and why trusted Tool input contracts must agree with registry configuration. These
-tests do not establish live-provider decision quality or production readiness.
+These tests do not establish live-provider decision quality or production readiness.
 
 ## Controller-owned Tool execution evidence
 
@@ -568,11 +563,7 @@ rejection, safe diagnostics, and identical controller, Trace,
 Eval, and Report results for all four scripted evaluation scenarios.
 
 The existing offline report demo remains the runnable demo; provider reliability
-is demonstrated by the offline tests. A supported resume statement is:
-"Hardened an LLM provider boundary with bounded request retries, quota-aware
-fail-fast handling, safe failure diagnostics, and deterministic integration
-regressions." Interview discussion can explain SDK retry multiplication, 429
-ambiguity, request retries versus investigation recovery, and response acceptance.
+is demonstrated by the offline tests.
 The offline checks exercise failure paths beyond those observed in the recorded
 live run; neither establishes general Provider reliability or production readiness.
 Unrecognized quota wording may evade the small classifier, while ambiguous
@@ -603,11 +594,7 @@ older baseline counts and recorded-current revision remain historical facts;
 they are not the current suite count or a moving HEAD.
 
 The example supports a reproducible demo of three recorded findings and one
-authorized scope expansion. A supported resume statement is: "Implemented typed,
-deterministic QA investigation reports with scoped finding projections, optional
-Trace summaries, and offline privacy and regression tests." For an interview,
-the code and tests support discussion of scope authorization, static risk versus
-runtime observations, report privacy, and separation of execution from reporting.
+authorized scope expansion.
 These regression and demo claims are separate from the recorded live results;
 neither establishes general live-provider quality, production readiness, or full
 QA coverage.
