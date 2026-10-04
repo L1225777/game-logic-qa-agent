@@ -1,0 +1,31 @@
+{
+  "run_id": "7175f92fdb9a4061953e0651e6fab68b",
+  "file_count": 4,
+  "total_size_bytes": 38701,
+  "files": [
+    {
+      "file": "7175f92fdb9a4061953e0651e6fab68b/manifest.json",
+      "source_path": "C:\\Users\\tomli\\GameQA-evidence\\fixed-live-7cd5fa440b094ccbad3cc975cd65fac5\\manifest.json",
+      "size_bytes": 467,
+      "sha256": "1edbf10840dafe6704dfc959c4ff72713c14d0cdae45598344dd7906432cef2c"
+    },
+    {
+      "file": "7175f92fdb9a4061953e0651e6fab68b/plan.json",
+      "source_path": "C:\\Users\\tomli\\GameQA-evidence\\fixed-live-7cd5fa440b094ccbad3cc975cd65fac5\\plan.json",
+      "size_bytes": 14762,
+      "sha256": "2025c6727287ba6bc6d77de14f7a27649750c2ec1ccf22de2ebc5b2dd6e1aab9"
+    },
+    {
+      "file": "7175f92fdb9a4061953e0651e6fab68b/results.json",
+      "source_path": "C:\\Users\\tomli\\GameQA-evidence\\fixed-live-7cd5fa440b094ccbad3cc975cd65fac5\\results.json",
+      "size_bytes": 20925,
+      "sha256": "a065ee95d2996bd3a1f96a2f59018e9d52bf3ae14ef4ffe9fc119599f4cf8f08"
+    },
+    {
+      "file": "7175f92fdb9a4061953e0651e6fab68b/report.md",
+      "source_path": "C:\\Users\\tomli\\GameQA-evidence\\fixed-live-7cd5fa440b094ccbad3cc975cd65fac5\\report.md",
+      "size_bytes": 2547,
+      "sha256": "25faa5b870ff53db55d74320505a38fc0837445aa3ea59a583160b480cb11851"
+    }
+  ]
+}

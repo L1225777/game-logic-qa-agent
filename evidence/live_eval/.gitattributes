@@ -1,0 +1,3 @@
+# Preserve evidence bytes; package validation hashes the original artifacts.
+*.json -text
+*.md -text

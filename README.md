@@ -481,8 +481,8 @@ the retained safe category does not establish the specific response rejection ca
 
 Schema 2 publication validation and independent reader validation both passed,
 including artifact hashes, exact slot identities, canonical finding/execution
-references and derived Markdown. The four run artifacts are retained outside the
-Git working tree, not bundled with this README. They contain safe projections,
+references and derived Markdown. The four run artifacts are archived in
+[evidence/live_eval/7175f92fdb9a4061953e0651e6fab68b/](evidence/live_eval/7175f92fdb9a4061953e0651e6fab68b/), with source paths, sizes and SHA-256 hashes in the [archive manifest](evidence/live_eval/ARCHIVE_MANIFEST.json). They contain safe projections,
 not raw completions, Provider reasons, Tool payloads, credentials or exception text.
 
 These are descriptive results for eight narrow fixtures with two repetitions
